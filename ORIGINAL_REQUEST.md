@@ -422,3 +422,79 @@ Rà soát, kiểm toán và nghiệm thu toàn diện giao diện Multi-Agent Fl
 
 Working directory: E:\GoogleDrive\WorkSpace\Code\ProjectGolang\GoLangDev\TokenMonitor
 Integrity mode: development
+
+## 2026-09-14T12:52:39Z
+
+Kiểm toán, rà soát và đồng bộ hóa toàn diện toàn bộ hệ sinh thái tài liệu kỹ thuật, sơ đồ kiến trúc và cổng tra cứu tập trung (`docs/`), đồng thời mã hóa sâu sắc toàn bộ bài học kinh nghiệm về giải thuật bố cục động (Force/Circular Layout), quy tắc cách ly tọa độ (Zero Coordinate Leakage), phân rã zoom/center, và triệt tiêu nhiễu thị giác (Zero Redundant Badges) vào bộ kỹ năng `interactive_topology_engine` (cả global skill và workspace skill). Đảm bảo các thế hệ subagent tiếp theo không bao giờ lặp lại lỗi dồn cục hay trôi dạt vào góc, đạt chuẩn vận hành ngay trong lần đầu tiên.
+
+Working directory: E:\GoogleDrive\WorkSpace\Code\ProjectGolang\GoLangDev\TokenMonitor
+Integrity mode: development
+
+## Requirements
+
+### R1. Chuẩn Hóa & Mã Hóa Bài Học Thực Chiến Vào Skill `interactive_topology_engine`
+Cập nhật cả 2 file skill:
+- Global: `C:\Users\EthanPham\.gemini\config\skills\interactive_topology_engine\SKILL.md`
+- Workspace: `E:\GoogleDrive\WorkSpace\Code\ProjectGolang\GoLangDev\TokenMonitor\docs\skills\interactive_topology_engine\SKILL.md`
+
+Bổ sung chương quy chuẩn chuyên sâu:
+1. **Quy Tắc Cách Ly Tọa Độ Tuyệt Đối (Absolute Coordinate Decoupling Protocol)**:
+   - Trong các chế độ bố cục động (`layout === 'force'` hoặc `layout === 'circular'`), **NGHIÊM CẤM** truyền bất kỳ tọa độ `x`, `y` hay gán `fixed: true` cho bất kỳ nốt nào (kể cả Root Controller hay Project Hubs). Bắt buộc `x: undefined, y: undefined, fixed: false`.
+   - Bất kỳ nốt nào bị neo tọa độ trong force/circular layout sẽ hoạt động như một mỏ neo lệch tâm kéo toàn bộ mạng lưới tác tử văng vào góc màn hình ("lào vào góc").
+2. **Quy Luật Tương Tác Vật Lý Động Theo Quy Mô Node (Force Physics Scaling Law)**:
+   - Lực đẩy Repulsion: Cực đại theo quy mô: $N > 40 \implies 2200$; $N > 25 \implies 1800$; $N > 12 \implies 1200$; $N \le 12 \implies 800$ (tuyệt đối không dùng mức thấp < 800 gây dính chùm).
+   - Chiều dài cạnh Edge Length: $[150, 300]$ đến $[180, 350]$ cho mạng lưới lớn.
+   - Trọng lực Gravity: Hạ xuống $0.03 - 0.06$ để đồ thị tự do bung rộng khắp không gian canvas 1920px, không dùng $\ge 0.1$ kéo sụp về tâm.
+   - Bố cục khởi tạo `initLayout: 'circular'` thay vì `'none'` để các nốt phân bổ đều theo bán kính trước khi mô phỏng vật lý kích hoạt.
+   - Ma sát `friction: 0.65` để hệ thống nhanh chóng đạt trạng thái cân bằng tĩnh, chấm dứt rung lắc kéo dài.
+3. **Phân Rã Độc Lập Zoom & Trọng Tâm (Layout-Specific Camera Decoupling)**:
+   - Không được dùng chung `savedGraphZoom` và `center` được tính từ tọa độ Cố Định (`pinned`) cho chế độ Tự Do hay Vòng Tròn.
+   - Trong `force` và `circular`, bắt buộc thiết lập `center: ['50%', '50%']` và `zoom: 0.85` (hoặc tính Auto-Fit không thiên vị).
+4. **Triệt Tiêu Nhiễu Thị Giác & Trùng Lặp Nhãn (Zero Visual Redundancy)**:
+   - Không vẽ huy hiệu chữ tĩnh thừa thãi (như `⚡ RUNNING` pill) đè lên nốt khi hiệu ứng vòng sóng radar lan tỏa và hào quang đã chỉ báo trực quan trạng thái.
+   - Giảm kích thước nốt và độ mờ shadowBlur ở chế độ Tự Do (Root 44px, Project 34px, Orch 28px, Subagent 22px).
+   - Làm thanh mảnh đường nối (`lineWidth: 0.8 - 1.8`, `curveness: 0.2`, `opacity: 0.4 - 0.8`) và chỉ hiện nhãn quan trọng ở chế độ Tự Do để biểu đồ thông thoáng, dễ nhìn.
+5. **Kỷ Luật Chẩn Đoán Lỗi Bố Cục Một Lần (Single-Iteration Diagnostic Discipline)**:
+   - Khi phát hiện lỗi hiển thị hoặc người dùng phản ánh "rối/văng góc", agent phải phân tích toàn diện 3 tầng: Tọa độ nốt (`x/y/fixed`), Tham số vật lý (`repulsion/gravity/edgeLength`), và Tham số khung nhìn (`zoom/center`). Tuyệt đối không vá lỗi chắp vá từng phần làm mất thời gian người dùng.
+
+### R2. Rà Soát & Đồng Bộ Toàn Bộ Hệ Thống Tài Liệu (`docs/`)
+Rà soát và cập nhật toàn bộ các file tài liệu trong `docs/` để phản ánh 100% hiện trạng kiến trúc và các tính năng mới nhất:
+- `docs/TokenMonitor_Team_Agent_Fleet_Architecture.md`:
+  * Cập nhật đặc tả 3 chế độ bố cục: 📌 Cố Định (4 tầng phân cấp), 🧲 Tự Do (Force đàn hồi dãn cách cao), ⭕ Tròn (Circular phân bổ bán kính).
+  * Cập nhật quy tắc lọc dự án trong vòng 1 giờ (`LatestActivity` / `IsRunning`).
+  * Cập nhật kiến trúc UI Responsive Auto-Fit & Dynamic Centering.
+- `docs/TokenMonitor_Configuration_Guide.md` & `docs/TokenMonitor_Core_Logic_and_DataFlow.md`: Cập nhật luồng đồng bộ UI và các API `/api/agents/graph`.
+- `README.md` & `PROJECT.md`: Cập nhật tình trạng hoàn thiện các tính năng Topology, Leaderboard và Git repository.
+- **Tái biên dịch Master Offline Portal (`docs/index.html`)**:
+  * Đồng bộ biến `DOCS_DATA` chứa đầy đủ nội dung tài liệu Markdown mới nhất.
+  * Đảm bảo mở 100% offline tự chứa qua giao thức `file:///`, zero CORS errors.
+
+### R3. Kiểm Tra & Đồng Bộ Mã Nguồn Dự Án (Code Parity & Validation)
+- Xác nhận mã nguồn trong `web/static/index.html` và `storage/repository.go` hoạt động nhất quán, mượt mà và không còn bất kỳ lỗi hồi quy nào.
+- Đảm bảo các tab (🌐 Tổng Hợp Đa LLM, 🍄 Google Antigravity, 🟢 OpenAI Codex, 🟣 Anthropic Claude, 📖 Cổng Tài Liệu) hiển thị trơn tru, không có lỗi JavaScript console.
+
+### R4. Kiểm Thử Tự Động, Biên Dịch Nhị Phân & Cập Nhật Git
+- Chạy toàn bộ test suite `go test -v -count=1 ./...` đảm bảo PASS 100% trên cả 5 packages.
+- Biên dịch lại file nhị phân `token_monitor.exe`.
+- Đẩy các cập nhật tài liệu và mã nguồn mới nhất lên GitHub repository `https://github.com/ethanpham86/Dashboard-Token-Monitor` (tiếp tục tuân thủ nghiêm ngặt quy tắc loại trừ các file md chứa skill).
+- Khởi động lại daemon `token_monitor.exe` phục vụ tại `http://127.0.0.1:9090`.
+
+## Acceptance Criteria
+
+### Chuẩn Hóa Skill & Tài Liệu
+- [ ] Skill `interactive_topology_engine` (cả global và workspace) được cập nhật đầy đủ 5 quy tắc vàng: Cách ly tọa độ, Tham số vật lý Force, Phân rã Zoom/Center, Triệt tiêu nhiễu thị giác, và Kỷ luật chẩn đoán một lần.
+- [ ] Toàn bộ tài liệu trong `docs/` (`TokenMonitor_Team_Agent_Fleet_Architecture.md`, `TokenMonitor_Configuration_Guide.md`, `README.md`, `PROJECT.md`) được đồng bộ 100% với code thực tế.
+- [ ] File `docs/index.html` tải toàn bộ tài liệu Markdown tự chứa offline qua giao thức `file:///`.
+
+### Trải Nghiệm Giao Diện & Vận Hành
+- [ ] Chế độ "🧲 Tự Do" hiển thị các nốt bung đều, rộng thoáng, căn giữa khung màn hình, không bị dồn cục và không bao giờ bị văng vào góc.
+- [ ] Chế độ "⭕ Tròn" hiển thị các nốt phân bổ đối xứng theo vòng tròn ở tâm khung nhìn.
+- [ ] Chế độ "📌 Cố Định" giữ nguyên chuẩn phân cấp 4 tầng kim tự tháp.
+- [ ] Không còn huy hiệu chữ "RUNNING" thừa thãi dưới chân nốt; chỉ hiển thị vòng sóng radar xoay toả và hạt photon mượt mà 60 FPS.
+
+### Kiểm Thử, Biên Dịch & Git
+- [ ] Lệnh `go test -v -count=1 ./...` đạt PASS 100%.
+- [ ] Nhị phân `token_monitor.exe` được biên dịch thành công.
+- [ ] Commit và push các thay đổi tài liệu/code lên GitHub `Dashboard-Token-Monitor`, cam kết không có file skill md nào lọt vào repo Git.
+- [ ] Daemon hoạt động bình thường tại `http://127.0.0.1:9090`.
+

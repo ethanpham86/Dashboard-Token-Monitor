@@ -4566,34 +4566,8 @@
             ctx.fillText(getRoleIcon(nd), nx, ny);
             ctx.restore();
 
-            // 5. Huy Hiệu Trạng Thái Nổi Bật (Floating Status Badge: ⚡ RUNNING)
-            if (isNodeRunning && !isNodeDim) {
-              const badgeY = ny + r + 13;
-              const badgeW = 72;
-              const badgeH = 17;
-              ctx.save();
-              ctx.fillStyle = 'rgba(16, 185, 129, 0.95)';
-              ctx.strokeStyle = '#6ee7b7';
-              ctx.lineWidth = 1.2;
-              ctx.shadowColor = '#10b981';
-              ctx.shadowBlur = 8;
-              ctx.beginPath();
-              if (typeof ctx.roundRect === 'function') {
-                ctx.roundRect(nx - badgeW / 2, badgeY - badgeH / 2, badgeW, badgeH, 4);
-              } else {
-                ctx.rect(nx - badgeW / 2, badgeY - badgeH / 2, badgeW, badgeH);
-              }
-              ctx.fill();
-              ctx.stroke();
 
-              ctx.font = 'bold 9px "JetBrains Mono", Inter, sans-serif';
-              ctx.fillStyle = '#ffffff';
-              ctx.textAlign = 'center';
-              ctx.textBaseline = 'middle';
-              ctx.shadowBlur = 0;
-              ctx.fillText('⚡ RUNNING', nx, badgeY);
-              ctx.restore();
-            }
+            // 5. Huy Hiệu RUNNING đã bỏ — hiệu ứng radar xoay toả sáng đã đủ chỉ báo trạng thái
           });
         }
       }
@@ -5911,11 +5885,12 @@
           const isOrch = (n.category === 1);
           
           // Tinh chỉnh kích cỡ nút nhỏ gọn, thanh thoát để tránh va chạm và rối mắt
+          const isForceMode = (topologyLayout === 'force');
           let symbolSize = Math.min(n.symbolSize || 26, 42);
-          if (isRoot) symbolSize = 52;
-          else if (isProject) symbolSize = Math.min(symbolSize, 42);
-          else if (isOrch) symbolSize = Math.min(symbolSize, 36);
-          else symbolSize = Math.min(symbolSize, 30);
+          if (isRoot) symbolSize = isForceMode ? 44 : 52;
+          else if (isProject) symbolSize = isForceMode ? 34 : Math.min(symbolSize, 42);
+          else if (isOrch) symbolSize = isForceMode ? 28 : Math.min(symbolSize, 36);
+          else symbolSize = isForceMode ? 22 : Math.min(symbolSize, 30);
 
           return {
             id: n.id,
@@ -5930,39 +5905,40 @@
             last_task: n.last_task,
             icon: n.icon,
             desc: n.desc,
-            x: (topologyLayout === 'pinned' || topologyLayout === 'none' || n.fixed || isRoot || isProject || currentTopologyProject === 'workspace_overview') ? n.x : undefined,
-            y: (topologyLayout === 'pinned' || topologyLayout === 'none' || n.fixed || isRoot || isProject || currentTopologyProject === 'workspace_overview') ? n.y : undefined,
-            fixed: (topologyLayout === 'pinned' || currentTopologyProject === 'workspace_overview' || isRoot || isProject ? true : (n.fixed && topologyLayout !== 'force')),
+            x: (topologyLayout === 'pinned' || currentTopologyProject === 'workspace_overview') ? n.x : undefined,
+            y: (topologyLayout === 'pinned' || currentTopologyProject === 'workspace_overview') ? n.y : undefined,
+            fixed: (topologyLayout === 'pinned' || currentTopologyProject === 'workspace_overview'),
             draggable: true,
             itemStyle: {
               color: isRoot ? '#fbbf2422' : color + '22',
               borderColor: isRoot ? '#fbbf24' : (isRunning ? '#ffffff' : (isProject ? '#c7d2fe' : color)),
               borderWidth: isRoot ? 3 : (isRunning ? 2.5 : (isProject ? 2 : 1.5)),
-              shadowBlur: isRoot ? 24 : (isRunning ? 16 : (isProject ? 12 : 6)),
+              shadowBlur: isForceMode ? (isRoot ? 14 : (isRunning ? 8 : (isProject ? 6 : 3))) : (isRoot ? 24 : (isRunning ? 16 : (isProject ? 12 : 6))),
               shadowColor: isRoot ? '#fbbf24' : (isRunning ? color : (isProject ? 'rgba(99, 102, 241, 0.4)' : 'rgba(0,0,0,0.5)'))
             },
             label: {
-              show: true,
+              show: isForceMode ? (isRoot || isProject || isOrch || isRunning) : true,
               position: (isRoot || isProject) ? 'top' : 'bottom',
-              distance: 6,
+              distance: isForceMode ? 4 : 6,
               color: isRoot ? '#fbbf24' : (isProject ? '#38bdf8' : '#e2e8f0'),
-              fontSize: isRoot ? 12 : (isProject ? 11 : 9.5),
+              fontSize: isForceMode ? (isRoot ? 11 : (isProject ? 10 : 8.5)) : (isRoot ? 12 : (isProject ? 11 : 9.5)),
               fontWeight: (isRoot || isProject) ? 700 : 500,
               textBorderColor: '#070b14',
               textBorderWidth: 3,
               formatter: function(params) {
                 const name = params.data.name || '';
                 const icon = getRoleIcon(params.data);
-                const shortName = name.length > 18 ? name.slice(0, 16) + '…' : name;
+                const maxLen = isForceMode ? 14 : 18;
+                const shortName = name.length > maxLen ? name.slice(0, maxLen - 2) + '…' : name;
                 if (isRoot) {
-                  return icon + ' ' + name;
+                  return icon + ' ' + (isForceMode ? (name.length > 20 ? name.slice(0, 18) + '…' : name) : name);
                 }
                 if (isProject) {
                   // Rút gọn ID dự án dài để tránh đè chữ
-                  if (name.startsWith('Dự Án #') && name.length > 18) {
-                    return icon + ' ' + name.slice(0, 15) + '…';
+                  if (name.startsWith('Dự Án #') && name.length > maxLen) {
+                    return icon + ' ' + name.slice(0, maxLen - 3) + '…';
                   }
-                  return icon + ' ' + (name.length > 20 ? name.slice(0, 18) + '…' : name);
+                  return icon + ' ' + (name.length > maxLen + 2 ? name.slice(0, maxLen) + '…' : name);
                 }
                 return icon + ' ' + shortName;
               }
@@ -5970,6 +5946,7 @@
           };
         });
 
+        const isForceMode = (topologyLayout === 'force');
         const isSmart = (topologyLabelMode === 'smart');
         const isTokens = (topologyMetric === 'tokens');
         const links = rawLinks.map(l => {
@@ -6042,20 +6019,22 @@
               }
             },
             lineStyle: {
-              color: isRootLink ? '#fbbf24' : (isBridge ? '#c084fc' : (isActive ? '#38bdf8' : 'rgba(100, 116, 139, 0.45)')),
-              width: isRootLink ? 2.6 : (isBridge ? 2.2 : (isActive ? 2 : 1.2)),
+              color: isRootLink ? '#fbbf24' : (isBridge ? '#c084fc' : (isActive ? '#38bdf8' : 'rgba(100, 116, 139, 0.35)')),
+              width: isForceMode
+                ? (isRootLink ? 1.8 : (isBridge ? 1.5 : (isActive ? 1.4 : 0.8)))
+                : (isRootLink ? 2.6 : (isBridge ? 2.2 : (isActive ? 2 : 1.2))),
               // KHÔNG set type tại đây — để series-level lineStyle.type quản lý dash pattern cho animation
-              curveness: isRootLink ? 0.04 : (isBridge ? 0.05 : 0.12),
-              opacity: (isRootLink || isActive) ? 0.95 : 0.7
+              curveness: isForceMode ? 0.2 : (isRootLink ? 0.04 : (isBridge ? 0.05 : 0.12)),
+              opacity: isForceMode ? ((isRootLink || isActive) ? 0.8 : 0.4) : ((isRootLink || isActive) ? 0.95 : 0.7)
             }
           };
         });
 
         const nLen = nodes.length;
-        // Tinh chỉnh lực đẩy dãn rộng theo chiều ngang, tăng trọng tâm hút để đồ thị luôn cân giữa khung
-        const dynamicRepulsion = nLen > 25 ? 650 : (nLen > 12 ? 480 : 350);
-        const dynamicEdgeLength = nLen > 25 ? [90, 160] : (nLen > 12 ? [70, 130] : [50, 100]);
-        const dynamicGravity = 0.12; // Lực hút ổn định kéo về tâm khung nhìn, ngăn trôi dạt ra ngoài mép
+        // Tinh chỉnh lực đẩy dãn rộng mạnh mẽ để tránh chồng lấn trong chế độ Tự Do
+        const dynamicRepulsion = nLen > 40 ? 2200 : (nLen > 25 ? 1800 : (nLen > 12 ? 1200 : 800));
+        const dynamicEdgeLength = nLen > 40 ? [180, 350] : (nLen > 25 ? [150, 300] : (nLen > 12 ? [120, 250] : [100, 200]));
+        const dynamicGravity = nLen > 40 ? 0.03 : (nLen > 25 ? 0.04 : 0.06); // Giảm lực hút tâm để nốt giãn ra, không dồn cục
 
         // Đồng bộ trạng thái active của các nút bố cục trên thanh điều khiển
         ['pinned', 'force', 'circular'].forEach(k => {
@@ -6065,8 +6044,11 @@
 
         // Tính toán tỷ lệ vừa khít khung nhìn (Auto-Fit) dựa trên tọa độ thực tế của tất cả node
         const fitConfig = calculateTopologyAutoFit(nodes);
-        const effectiveZoom = savedGraphZoom || fitConfig.zoom;
+        const isForceLayout = (topologyLayout === 'force');
+        const isCircularLayout = (topologyLayout === 'circular');
         const isPinnedOrOverview = (topologyLayout === 'pinned' || currentTopologyProject === 'workspace_overview');
+        // Force/Circular: luôn center 50%/50%, zoom mặc định — không dùng savedGraphZoom (toạ độ pinned gây lệch)
+        const effectiveZoom = (isForceLayout || isCircularLayout) ? 0.85 : (savedGraphZoom || fitConfig.zoom);
         const effectiveCenter = isPinnedOrOverview ? fitConfig.center : ['50%', '50%'];
 
         option = {
@@ -6134,11 +6116,11 @@
               hideOverlap: true
             },
             force: {
-              initLayout: 'none',
+              initLayout: 'circular',
               repulsion: dynamicRepulsion,
               edgeLength: dynamicEdgeLength,
               gravity: dynamicGravity,
-              friction: 0.80
+              friction: 0.65
             },
             circular: {
               rotateLabel: true
