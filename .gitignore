@@ -1,0 +1,30 @@
+﻿# Binaries and build artifacts
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+token_monitor
+
+# Database files & runtime data
+data/
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
+
+# Agent execution folders & scratchpad
+.agents/
+scratch/
+.tempmediaStorage/
+.user_uploaded/
+
+# Exclude all skill directories and markdown files containing skills (per user request: "trừ các file md chứa skill")
+my-skills/
+skills/
+**/skills/
+**/*skill*.md
+**/*SKILL*.md
+**/*Skill*.md
+**/*_skill.md
+**/*_SKILL.md

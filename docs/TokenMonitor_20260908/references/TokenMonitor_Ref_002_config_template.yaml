@@ -1,0 +1,72 @@
+# ==================================================================================
+# File Name    : TokenMonitor_Ref_002_config_template.yaml
+# Description  : File cấu hình chuẩn mẫu (Production Reference Config) cho TokenMonitor
+# System       : TokenMonitor
+# Date         : 2026-09-08
+# ==================================================================================
+
+server:
+  # Cổng lắng nghe của Dashboard Web UI
+  dashboard_port: 9090
+  # Địa chỉ host liên kết (0.0.0.0 để mở mạng LAN hoặc 127.0.0.1 chỉ cho local)
+  bind_address: "127.0.0.1"
+  # Read/Write Timeout cho HTTP Server (tránh treo socket)
+  read_timeout_seconds: 15
+  write_timeout_seconds: 30
+
+proxy:
+  # Bật/Tắt module Reverse Proxy Interceptor
+  enabled: false
+  # Cổng proxy để client/SDK gọi tới (thay vì gọi trực tiếp googleapis)
+  listen_port: 8080
+  # Upstream Gemini API Endpoint gốc
+  upstream_target: "https://generativelanguage.googleapis.com"
+  # Concurrency limit xử lý đồng thời qua proxy
+  max_concurrent_requests: 100
+  # Timeout tối đa chờ response từ Gemini (đặc biệt khi model suy luận lâu)
+  upstream_timeout_seconds: 180
+
+database:
+  # Đường dẫn file SQLite lưu trữ cơ sở dữ liệu
+  sqlite_path: "./data/token_monitor.db"
+  # Connection pooling settings
+  max_open_conns: 25
+  max_idle_conns: 10
+  conn_max_lifetime_minutes: 60
+  # Bật chế độ WAL (Write-Ahead Logging) để tăng tốc độ ghi đồng thời
+  enable_wal_mode: true
+  # Tần suất chạy job tổng hợp rollup dữ liệu (giây)
+  rollup_interval_seconds: 300
+
+account_profile:
+  # Thông tin tài khoản hiển thị trên Dashboard
+  email: "neurozextra@gmail.com"
+  account_type: "Google Consumer Account (Individual)"
+  plan_name: "20X ULTRA PLAN"
+  quota_bandwidth: "20x Quota Bandwidth"
+  # File UUID định danh máy cục bộ
+  installation_uuid_path: "C:\\Users\\EthanPham\\.gemini\\antigravity\\installation_id"
+  # Ngày đăng ký và hết hạn chu kỳ hiện tại
+  subscription_start: "2026-09-06"
+  subscription_expiry: "2026-10-06"
+  auto_renew: true
+
+local_tailer:
+  # Bật tính năng quét và nạp log từ Antigravity IDE cục bộ
+  enabled: true
+  # Thư mục logs của IDE
+  ide_brain_dir: "C:\\Users\\EthanPham\\.gemini\\antigravity\\brain"
+  ide_conv_db_dir: "C:\\Users\\EthanPham\\.gemini\\antigravity\\conversations"
+  # Chu kỳ quét tìm file mới (giây)
+  poll_interval_seconds: 10
+
+alerting:
+  # Bật cảnh báo khi chạm hạn ngạch
+  enabled: false
+  # Ngưỡng token cảnh báo trong ngày (vd: 50 triệu token)
+  daily_token_threshold: 50000000
+  # Cảnh báo khi token hết hạn trước X phút
+  token_expiry_warning_minutes: 10
+  telegram:
+    bot_token: "ENV_OR_SECRET_HERE"
+    chat_id: "-1002485438416"

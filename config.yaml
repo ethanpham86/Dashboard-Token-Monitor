@@ -1,0 +1,68 @@
+server:
+  dashboard_port: 9090
+  bind_address: "127.0.0.1"
+  read_timeout_seconds: 15
+  write_timeout_seconds: 30
+
+proxy:
+  enabled: false
+  listen_port: 8080
+  upstream_target: "https://generativelanguage.googleapis.com"
+  max_concurrent_requests: 100
+  upstream_timeout_seconds: 180
+
+database:
+  sqlite_path: "./data/token_monitor.db"
+  max_open_conns: 25
+  max_idle_conns: 10
+  conn_max_lifetime_minutes: 60
+  enable_wal_mode: true
+  rollup_interval_seconds: 300
+
+account_profile:
+  email: "ethanpham671986@gmail.com"
+  account_type: "Google Consumer Account (Individual)"
+  plan_name: "Google AI Ultra (Pham Ethan)"
+  quota_bandwidth: "Unlimited Local Quota"
+  installation_uuid_path: "C:\\Users\\EthanPham\\.gemini\\antigravity\\installation_id"
+  subscription_start: "2026-09-06"
+  subscription_expiry: "2026-10-06"
+  auto_renew: true
+
+local_tailer:
+  enabled: true
+  ide_brain_dir: "C:\\Users\\EthanPham\\.gemini\\antigravity\\brain"
+  ide_conv_db_dir: "C:\\Users\\EthanPham\\.gemini\\antigravity\\conversations"
+  poll_interval_seconds: 10
+
+# Giám sát OpenAI/Codex hoàn toàn thụ động từ session JSONL cục bộ.
+# Để trống sessions_dir để tự dùng ~/.codex/sessions. Collector không đọc auth.json.
+openai_monitor:
+  enabled: true
+  sessions_dir: ""
+  poll_interval_seconds: 10
+  max_session_rows: 50
+  max_files: 1000
+
+# Giám sát Anthropic Claude Code hoàn toàn thụ động từ projects session JSONL cục bộ.
+# Để trống projects_dir để tự dùng ~/.claude/projects. Collector không đọc .credentials.json.
+claude_monitor:
+  enabled: true
+  projects_dir: ""
+  poll_interval_seconds: 10
+  max_session_rows: 50
+  max_files: 1000
+
+alerting:
+  enabled: false
+  daily_token_threshold: 50000000
+  token_expiry_warning_minutes: 10
+  telegram:
+    bot_token: ""
+    chat_id: ""
+
+backup:
+  enabled: true
+  interval_minutes: 60
+  backup_dir: "./data/backup"
+  max_keep: 7

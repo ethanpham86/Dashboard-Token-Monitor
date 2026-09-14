@@ -1,0 +1,39 @@
+{
+  "candidates": [
+    {
+      "content": {
+        "parts": [
+          {
+            "text": "Phản hồi mẫu từ mô hình LLM với cơ chế suy luận chuyên sâu..."
+          }
+        ],
+        "role": "model"
+      },
+      "finishReason": "STOP",
+      "index": 0
+    }
+  ],
+  "usageMetadata": {
+    "promptTokenCount": 15287172,
+    "candidatesTokenCount": 2105792,
+    "totalTokenCount": 17392964,
+    "cachedContentTokenCount": 199888936,
+    "candidatesTokensDetails": [
+      {
+        "modality": "TEXT",
+        "tokenCount": 1410029
+      },
+      {
+        "modality": "THINKING",
+        "tokenCount": 695763
+      }
+    ],
+    "promptTokensDetails": [
+      {
+        "modality": "TEXT",
+        "tokenCount": 15287172
+      }
+    ]
+  },
+  "modelVersion": "gemini-3.8-flash"
+}

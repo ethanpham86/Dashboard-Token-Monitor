@@ -1,0 +1,103 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "TokenMonitor Database ERD & Storage Topology",
+    "output": "tokenmonitor-database-erd.html",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "full-erd",
+        "label": "Toàn Bộ Sơ Đồ Thực Thể (Full 5 Bảng ERD)",
+        "focus": ["tbl-accounts", "tbl-auth-sessions", "tbl-usage-logs", "tbl-hourly-rollup", "tbl-fleet-telemetry", "sqlite-wal-engine", "idx-timestamp", "idx-model", "idx-rollup", "idx-dedup"],
+        "note": "Tổng quan quan hệ 1:N giữa bảng cha accounts và 4 bảng con nhật ký, rollup, telemetry."
+      },
+      {
+        "id": "relational-tables",
+        "label": "Quan Hệ Bảng Dữ Liệu (1:N Relations)",
+        "focus": ["tbl-accounts", "tbl-auth-sessions", "tbl-usage-logs", "tbl-hourly-rollup", "tbl-fleet-telemetry"],
+        "note": "Khóa ngoại cascade từ bảng accounts sang auth_sessions, logs, rollup và fleet telemetry."
+      },
+      {
+        "id": "finops-and-telemetry",
+        "label": "Bảng FinOps Rollup & Fleet Telemetry",
+        "focus": ["tbl-hourly-rollup", "tbl-fleet-telemetry", "sqlite-wal-engine", "idx-rollup"],
+        "note": "Hai bảng phục vụ tính toán chi phí FinOps USD và giám sát luồng tác tử con Concurrency."
+      },
+      {
+        "id": "indexes-and-engine",
+        "label": "Tầng Chỉ Mục & Động Cơ SQLite WAL",
+        "focus": ["sqlite-wal-engine", "idx-timestamp", "idx-model", "idx-rollup", "idx-dedup"],
+        "note": "Các index B-Tree tối ưu truy vấn thời gian thực và tổng hợp dữ liệu."
+      }
+    ]
+  },
+  "components": [
+    { "id": "tbl-accounts", "type": "database", "label": "Bảng accounts", "sublabel": "PK: id | Email duy nhất", "pos": [60, 260], "size": [180, 64], "brand": "sqlite", "tag": "Bảng Cha (1)" },
+    { "id": "tbl-auth-sessions", "type": "security", "label": "Bảng auth_sessions", "sublabel": "FK: account_id | Token TTL", "pos": [360, 100], "size": [190, 64], "tag": "Phiên Làm Việc (N)" },
+    { "id": "tbl-usage-logs", "type": "database", "label": "token_usage_logs", "sublabel": "FK: account_id | Raw Logs", "pos": [360, 260], "size": [190, 64], "brand": "sqlite", "tag": "Log Sự Kiện (N)" },
+    { "id": "tbl-hourly-rollup", "type": "database", "label": "token_usage_hourly_rollup", "sublabel": "FK: account_id | FinOps Rollup", "pos": [360, 420], "size": [190, 64], "brand": "sqlite", "tag": "Dữ Liệu Gộp (N)" },
+    { "id": "tbl-fleet-telemetry", "type": "backend", "label": "agent_fleet_telemetry", "sublabel": "FK: account_id | Concurrency", "pos": [360, 580], "size": [190, 64], "brand": "sqlite", "tag": "Tác Vụ Subagent (N)" },
+    { "id": "sqlite-wal-engine", "type": "backend", "label": "SQLite WAL Engine", "sublabel": "PRAGMA journal=WAL", "pos": [660, 260], "size": [180, 64], "brand": "sqlite", "tag": "Không Khóa File" },
+    { "id": "idx-timestamp", "type": "backend", "label": "Index: timestamp", "sublabel": "idx_token_usage_timestamp", "pos": [940, 100], "size": [190, 64], "tag": "B-Tree DESC" },
+    { "id": "idx-model", "type": "backend", "label": "Index: model_name", "sublabel": "idx_token_usage_account_model", "pos": [940, 260], "size": [190, 64], "tag": "Compound Index" },
+    { "id": "idx-rollup", "type": "backend", "label": "Index: time_bucket", "sublabel": "idx_hourly_bucket", "pos": [940, 420], "size": [190, 64], "tag": "Rollup Index" },
+    { "id": "idx-dedup", "type": "backend", "label": "Index: request_type", "sublabel": "idx_token_dedup_chat", "pos": [940, 580], "size": [190, 64], "tag": "Partial Unique" }
+  ],
+  "boundaries": [
+    { "kind": "region", "label": "Cơ Sở Dữ Liệu Nội Bộ (SQLite File: ./data/token_monitor.db)", "wraps": ["tbl-accounts", "tbl-auth-sessions", "tbl-usage-logs", "tbl-hourly-rollup", "tbl-fleet-telemetry", "sqlite-wal-engine", "idx-timestamp", "idx-model", "idx-rollup", "idx-dedup"] },
+    { "kind": "security-group", "label": "Khối Bảng Thực Thể Quan Hệ (1:N Schema)", "wraps": ["tbl-accounts", "tbl-auth-sessions", "tbl-usage-logs", "tbl-hourly-rollup", "tbl-fleet-telemetry"] }
+  ],
+  "connections": [
+    { "id": "acc-to-auth", "from": "tbl-accounts", "to": "tbl-auth-sessions", "label": "1:N sessions", "variant": "security", "fromSide": "top", "toSide": "left", "via": [[150, 132], [360, 132]], "labelAt": [255, 120] },
+    { "id": "acc-to-logs", "from": "tbl-accounts", "to": "tbl-usage-logs", "label": "1:N event logs", "variant": "emphasis", "fromSide": "right", "toSide": "left" },
+    { "id": "acc-to-rollup", "from": "tbl-accounts", "to": "tbl-hourly-rollup", "label": "1:N rollups", "variant": "default", "fromSide": "bottom", "toSide": "left", "via": [[150, 452], [360, 452]], "labelAt": [255, 440] },
+    { "id": "acc-to-fleet", "from": "tbl-accounts", "to": "tbl-fleet-telemetry", "label": "1:N fleet", "variant": "default", "fromSide": "bottom", "toSide": "left", "via": [[150, 612], [360, 612]], "labelAt": [255, 600] },
+    { "id": "logs-to-engine", "from": "tbl-usage-logs", "to": "sqlite-wal-engine", "label": "WAL append", "variant": "emphasis", "fromSide": "right", "toSide": "left" },
+    { "id": "rollup-to-engine", "from": "tbl-hourly-rollup", "to": "sqlite-wal-engine", "label": "5m periodic", "variant": "default", "fromSide": "right", "toSide": "bottom", "via": [[600, 452], [750, 452]], "labelAt": [650, 440] },
+    { "id": "fleet-to-engine", "from": "tbl-fleet-telemetry", "to": "sqlite-wal-engine", "label": "sweep TTL 2m", "variant": "default", "fromSide": "right", "toSide": "bottom", "via": [[600, 612], [750, 612]], "labelAt": [650, 600] },
+    { "id": "engine-to-idx-time", "from": "sqlite-wal-engine", "to": "idx-timestamp", "label": "auto index", "variant": "default", "fromSide": "top", "toSide": "left", "via": [[750, 132], [940, 132]], "labelAt": [845, 120] },
+    { "id": "engine-to-idx-model", "from": "sqlite-wal-engine", "to": "idx-model", "label": "fast lookup", "variant": "emphasis", "fromSide": "right", "toSide": "left" },
+    { "id": "engine-to-idx-rollup", "from": "sqlite-wal-engine", "to": "idx-rollup", "label": "sub-10ms query", "variant": "default", "fromSide": "bottom", "toSide": "left", "via": [[750, 452], [940, 452]], "labelAt": [845, 440] },
+    { "id": "engine-to-idx-dedup", "from": "sqlite-wal-engine", "to": "idx-dedup", "label": "dedup index", "variant": "default", "fromSide": "bottom", "toSide": "left", "via": [[750, 612], [940, 612]], "labelAt": [845, 600] }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "Cấu Trúc Thực Thể Bền Vững (1:N Cascade)",
+      "items": [
+        "Bảng accounts làm gốc, liên kết với auth_sessions, token_usage_logs, token_usage_hourly_rollup và agent_fleet_telemetry",
+        "Ràng buộc ON DELETE CASCADE đảm bảo toàn vẹn dữ liệu khi dọn dẹp tài khoản",
+        "Kiểu dữ liệu chuẩn SQLite (INTEGER, TEXT, DATETIME, REAL, BOOLEAN)"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "Tối Ưu Hóa Truy Vấn Bằng Chỉ Mục (Indexes)",
+      "items": [
+        "Index thời gian idx_token_usage_timestamp giúp tải log mới nhất tức thì",
+        "Compound Index (account_id, model_name, timestamp) tối ưu lọc riêng từng model",
+        "Rollup Index idx_hourly_bucket tăng tốc độ vẽ biểu đồ 30 ngày dưới 10ms",
+        "Partial Unique Index idx_token_dedup_chat ngăn chặn ghi trùng lặp các yêu cầu chat dạng CHAT_%"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Chế Độ SQLite WAL Mode (Hiệu Năng Cao)",
+      "items": [
+        "Đọc ghi song song không khóa bảng, tránh hoàn toàn lỗi 'database is locked'",
+        "Dành 64 MB RAM cho Page Cache và lưu bảng tạm trên bộ nhớ",
+        "Toàn bộ file dữ liệu nằm trong máy cá nhân tại ./data/token_monitor.db"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "FinOps Aggregation & Fleet Telemetry",
+      "items": [
+        "Bảng agent_fleet_telemetry đo tải đa tác nhân (ACTIVE CONCURRENCY) với TTL 2 phút tự động dọn dẹp task ma",
+        "Bảng hourly_rollup lưu trữ tiền tổng hợp theo giờ, kết hợp hàm CalculateTokensCostUSD() tính toán chi phí USD/VNĐ",
+        "Truy vấn FinOps trên bảng Rollup chỉ mất <3ms, loại bỏ hoàn toàn nghẽn quét bảng thô"
+      ]
+    }
+  ]
+}

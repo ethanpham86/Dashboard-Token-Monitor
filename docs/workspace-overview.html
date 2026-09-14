@@ -1,0 +1,698 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Workspace Architecture — Animated Data Flow</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'Inter', system-ui, sans-serif;
+      background: #060913;
+      color: #f1f5f9;
+      overflow: hidden;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── Header ── */
+    .header {
+      padding: 16px 32px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid rgba(56, 189, 248, .12);
+      background: rgba(6, 9, 19, .85);
+      backdrop-filter: blur(12px);
+      z-index: 20;
+    }
+    .header-left { display: flex; align-items: center; gap: 14px; }
+    .header-logo {
+      width: 38px; height: 38px;
+      background: linear-gradient(135deg, #06b6d4, #8b5cf6);
+      border-radius: 10px;
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 800; font-size: 15px; color: #fff;
+      box-shadow: 0 0 20px rgba(6, 182, 212, .35);
+    }
+    .header h1 { font-size: 16px; font-weight: 700; letter-spacing: -.02em; }
+    .header p { font-size: 11px; color: #64748b; font-family: 'JetBrains Mono', monospace; }
+    .header-controls { display: flex; gap: 10px; }
+    .btn {
+      padding: 7px 16px; border-radius: 8px; border: 1px solid rgba(255,255,255,.08);
+      background: rgba(255,255,255,.04); color: #94a3b8; font-size: 12px;
+      cursor: pointer; transition: all .2s; font-family: inherit;
+    }
+    .btn:hover { background: rgba(255,255,255,.08); color: #f1f5f9; }
+    .btn.active { background: rgba(6, 182, 212, .15); color: #06b6d4; border-color: rgba(6, 182, 212, .3); }
+    .legend {
+      display: flex; gap: 18px; align-items: center; font-size: 11px; color: #64748b;
+    }
+    .legend-dot {
+      width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 5px;
+    }
+
+    /* ── Canvas ── */
+    #canvas-wrap {
+      flex: 1; position: relative; overflow: hidden;
+    }
+    canvas {
+      position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+    }
+
+    /* ── Tooltip ── */
+    #tooltip {
+      position: fixed; z-index: 100;
+      background: rgba(15, 23, 42, .95); backdrop-filter: blur(16px);
+      border: 1px solid rgba(56, 189, 248, .2);
+      border-radius: 10px; padding: 14px 18px;
+      pointer-events: none; opacity: 0;
+      transition: opacity .15s;
+      max-width: 320px;
+      box-shadow: 0 8px 32px rgba(0,0,0,.5);
+    }
+    #tooltip.show { opacity: 1; }
+    #tooltip h3 { font-size: 13px; font-weight: 700; margin-bottom: 4px; }
+    #tooltip .sub { font-size: 11px; color: #94a3b8; margin-bottom: 6px; font-family: 'JetBrains Mono', monospace; }
+    #tooltip .tag { display: inline-block; font-size: 10px; padding: 2px 8px; border-radius: 4px; background: rgba(6,182,212,.15); color: #06b6d4; }
+    #tooltip .items { font-size: 11px; color: #cbd5e1; margin-top: 6px; }
+    #tooltip .items li { margin-bottom: 3px; list-style: none; padding-left: 12px; position: relative; }
+    #tooltip .items li::before { content: '›'; position: absolute; left: 0; color: #06b6d4; }
+
+    /* ── Stats Bar ── */
+    .stats-bar {
+      padding: 10px 32px;
+      display: flex; gap: 24px; align-items: center;
+      border-top: 1px solid rgba(56, 189, 248, .08);
+      background: rgba(6, 9, 19, .9);
+      font-size: 11px; color: #64748b;
+      font-family: 'JetBrains Mono', monospace;
+    }
+    .stats-bar .stat-val { color: #06b6d4; font-weight: 600; }
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-left">
+    <div class="header-logo">W</div>
+    <div>
+      <h1>Workspace Architecture — Live Data Flow</h1>
+      <p>MCREDIT (ProjectR) ↔ TieuChuanHardeningLinux (DevSecOps) ↔ TokenMonitor (GoLang) ↔ ProjectScriptOS (OS Automation) · Interactive Animated Diagram</p>
+    </div>
+  </div>
+  <div class="legend">
+    <span><span class="legend-dot" style="background:#06b6d4"></span>Backend / Go</span>
+    <span><span class="legend-dot" style="background:#f59e0b"></span>Database</span>
+    <span><span class="legend-dot" style="background:#8b5cf6"></span>R Core</span>
+    <span><span class="legend-dot" style="background:#10b981"></span>Infra / Config</span>
+    <span><span class="legend-dot" style="background:#f43f5e"></span>Cloud / API</span>
+    <span><span class="legend-dot" style="background:#38bdf8"></span>Frontend / UI</span>
+  </div>
+  <div class="header-controls">
+    <button class="btn active" id="btn-speed-normal">1× Speed</button>
+    <button class="btn" id="btn-speed-fast">3× Speed</button>
+    <button class="btn" id="btn-pause">⏸ Pause</button>
+  </div>
+</div>
+
+<div id="canvas-wrap">
+  <canvas id="bg-canvas"></canvas>
+  <canvas id="main-canvas"></canvas>
+</div>
+
+<div id="tooltip">
+  <h3 id="tt-title"></h3>
+  <div class="sub" id="tt-sub"></div>
+  <span class="tag" id="tt-tag"></span>
+  <ul class="items" id="tt-items"></ul>
+</div>
+
+<div class="stats-bar">
+  <span>Nodes: <span class="stat-val" id="stat-nodes">0</span></span>
+  <span>Connections: <span class="stat-val" id="stat-conns">0</span></span>
+  <span>Active Particles: <span class="stat-val" id="stat-particles">0</span></span>
+  <span>FPS: <span class="stat-val" id="stat-fps">0</span></span>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════
+//  DATA MODEL — Nodes & Connections
+// ═══════════════════════════════════════════════════
+
+const NODES = [
+  // ── MCREDIT Project (left side) ──
+  { id: 'mcredit',       x: .15, y: .08,  r: 36, color: '#8b5cf6', glow: '#8b5cf680', label: 'MCREDIT', sub: 'ProjectR — R Core Reports', icon: '📁',
+    tag: 'R Production', items: ['job_runner tự động hóa 20+ báo cáo', 'ELK logging + Telegram alerts', 'Oracle JDBC + T24 file ingestion'] },
+  { id: 'job_runner',    x: .08, y: .25,  r: 22, color: '#10b981', glow: '#10b98180', label: 'Job Runner', sub: 'Stateless Retry Engine', icon: '⚙',
+    tag: 'Scheduler', items: ['Cron-based auto execution', 'YAML config (job_schedule.yml)', 'Max retry + retry_wait pattern'] },
+  { id: 'r_modules',     x: .18, y: .42,  r: 20, color: '#8b5cf6', glow: '#8b5cf680', label: 'R Modules', sub: 'logger · mail · telegram · excel', icon: '📦',
+    tag: 'Shared Libs', items: ['logger_module.R → ELK JSON', 'mail_functions.R → SMTP', 'writeToExcel.R → xlsx output'] },
+  { id: 'r_scripts',     x: .06, y: .42,  r: 18, color: '#8b5cf6', glow: '#8b5cf680', label: 'R Scripts', sub: 'Code-Runing/*.R', icon: '📝',
+    tag: 'Jobs', items: ['GL_OTP, GL_W4, GTCG…', 'T24-DS-BUILD-SK-ACCOUNT', 'Sao kê + download pattern'] },
+  { id: 'oracle_db',     x: .12, y: .58,  r: 22, color: '#f59e0b', glow: '#f59e0b80', label: 'Oracle DB', sub: 'T24 Core Banking (JDBC)', icon: '🗄',
+    tag: 'Database', items: ['rJava + RJDBC connector', 'STG schema queries', 'ojdbc11.jar driver'] },
+  { id: 't24_files',     x: .24, y: .58,  r: 18, color: '#10b981', glow: '#10b98180', label: 'T24 Files', sub: 'NFS Sao Kê (# delimited)', icon: '📄',
+    tag: 'Data Source', items: ['SAOKE.TINDUNG, SAOKE.PD', 'MULTI.LINE.MVMT', 'fread(sep="#", fill=TRUE)'] },
+  { id: 'mail_server',   x: .04, y: .58,  r: 16, color: '#f43f5e', glow: '#f43f5e80', label: 'Mail Server', sub: 'SMTP mcredit.com.vn', icon: '📧',
+    tag: 'Alert', items: ['Report delivery', 'Error notification', 'Masked sensitive info'] },
+  { id: 'telegram',      x: .04, y: .42,  r: 14, color: '#f43f5e', glow: '#f43f5e80', label: 'Telegram', sub: 'Bot Alert Channel', icon: '💬',
+    tag: 'Alert', items: ['send_tg_success/error', 'SEND_TELEGRAM flag', 'chatID config'] },
+  { id: 'elk',           x: .24, y: .25,  r: 18, color: '#f43f5e', glow: '#f43f5e80', label: 'ELK Stack', sub: 'Centralized Logging', icon: '📊',
+    tag: 'Monitoring', items: ['JSON structured logs', '@timestamp + context.pid', 'Pipeline task tracking'] },
+  { id: 'deploy_server', x: .15, y: .70,  r: 16, color: '#10b981', glow: '#10b98180', label: 'Deploy', sub: 'SCP Upload Servers', icon: '🚀',
+    tag: 'Delivery', items: ['scp_upload.R module', 'scp_targets.yml config', 'BatchMode + timeout'] },
+
+  // ── TokenMonitor Project (right side) ──
+  { id: 'tokenmonitor',  x: .85, y: .08,  r: 36, color: '#06b6d4', glow: '#06b6d480', label: 'TokenMonitor', sub: 'GoLang — FinOps Daemon', icon: '📁',
+    tag: 'Go Binary', items: ['Enterprise-grade observability', 'Zero outbound network', '6-station data pipeline'] },
+  { id: 'tailer',        x: .72, y: .25,  r: 22, color: '#06b6d4', glow: '#06b6d480', label: 'Tailer', sub: 'collector/tailer.go', icon: '👁',
+    tag: 'Station 1-2', items: ['Delta scan every 10s', '~154 transcript folders', 'Subagent role classifier'] },
+  { id: 'buffer',        x: .82, y: .42,  r: 20, color: '#f59e0b', glow: '#f59e0b80', label: 'Ring Buffer', sub: 'collector/buffer.go', icon: '⚡',
+    tag: 'Station 3', items: ['chan Event capacity=1000', 'Batch flush 100 items/1s', 'Non-blocking drop'] },
+  { id: 'sqlite',        x: .92, y: .42,  r: 22, color: '#f59e0b', glow: '#f59e0b80', label: 'SQLite WAL', sub: 'token_monitor.db', icon: '🗄',
+    tag: 'Station 4', items: ['5 tables, 7 indexes', 'WAL mode concurrent R/W', 'Hourly rollup + TTL sweep'] },
+  { id: 'repository',    x: .92, y: .25,  r: 20, color: '#06b6d4', glow: '#06b6d480', label: 'Repository', sub: 'storage/repository.go', icon: '💰',
+    tag: 'FinOps', items: ['CalculateTokensCostUSD()', 'Pricing $0.075 - $10.00 / 1M', 'Context Cache -75% cost'] },
+  { id: 'handler',       x: .82, y: .25,  r: 18, color: '#06b6d4', glow: '#06b6d480', label: 'API Server', sub: 'web/handler.go :9090', icon: '🔌',
+    tag: 'Station 5', items: ['12 REST API endpoints', '/api/metrics/* + /api/agents/*', 'Sub-10ms response'] },
+  { id: 'dashboard',     x: .75, y: .42,  r: 18, color: '#38bdf8', glow: '#38bdf880', label: 'Dashboard', sub: 'web/static/index.html', icon: '📈',
+    tag: 'Station 6', items: ['4 views + FinOps modal', 'Donut + Topology Graph', 'Auto-refresh 5s fetch'] },
+  { id: 'detector',      x: .72, y: .58,  r: 18, color: '#10b981', glow: '#10b98180', label: 'Detector', sub: 'storage/detector.go', icon: '🔐',
+    tag: 'Security', items: ['state.vscdb mode=ro', 'OAuth Ultra/Pro detection', 'Zero credentials'] },
+  { id: 'config_tm',     x: .82, y: .58,  r: 16, color: '#10b981', glow: '#10b98180', label: 'Config', sub: 'config.yaml', icon: '⚙',
+    tag: 'Settings', items: ['Port 9090, DB path', 'Scan interval 10s', 'Rollup interval 300s'] },
+  { id: 'backup',        x: .92, y: .58,  r: 16, color: '#f59e0b', glow: '#f59e0b80', label: 'Auto Backup', sub: 'storage/backup.go', icon: '💾',
+    tag: 'Enterprise', items: ['VACUUM INTO snapshots', 'Retention max_keep', 'Atomic non-blocking'] },
+
+  // ── Shared Cloud ──
+  { id: 'gemini',        x: .50, y: .06,  r: 28, color: '#f43f5e', glow: '#f43f5e80', label: 'Google Gemini', sub: 'External LLM Engine', icon: '🤖',
+    tag: 'Cloud API', items: ['Gemini 2.5 Pro/Flash/Ultra', 'TLS :443 outbound', 'Token usage → monitored'] },
+  { id: 'antigravity',   x: .50, y: .22,  r: 26, color: '#38bdf8', glow: '#38bdf880', label: 'Antigravity IDE', sub: 'Developer Workspace', icon: '💻',
+    tag: 'IDE', items: ['Multi-workspace support', 'transcript.jsonl output', 'state.vscdb session'] },
+  { id: 'transcript',    x: .50, y: .40,  r: 20, color: '#10b981', glow: '#10b98180', label: 'transcript.jsonl', sub: 'Local SSD Log File', icon: '📋',
+    tag: 'Data Bridge', items: ['IDE appends chat logs', 'TokenMonitor reads (O_RDONLY)', 'Bridge giữa 2 hệ thống'] },
+
+  // ── Cross-project link nodes ──
+  { id: 'google_drive',  x: .50, y: .54,  r: 18, color: '#10b981', glow: '#10b98180', label: 'Google Drive', sub: 'Shared Workspace Storage', icon: '☁',
+    tag: 'Sync', items: ['E:\\GoogleDrive\\WorkSpace', 'ProjectR + ProjectGolang + Mcredit', 'Cross-device sync'] },
+  { id: 'docs_portal',   x: .50, y: .64,  r: 18, color: '#38bdf8', glow: '#38bdf880', label: 'Docs Portal', sub: 'docs/index.html · Offline', icon: '📚',
+    tag: '100% Offline', items: ['6 documentation standards', 'Architecture + ERD + Dataflow', 'Inlined DOCS_DATA object'] },
+
+  // ── TieuChuanHardeningLinux Project (center-bottom) ──
+  { id: 'hardening_hub', x: .50, y: .76,  r: 32, color: '#f59e0b', glow: '#f59e0b80', label: 'Hardening Linux', sub: 'DevSecOps — Security Standards', icon: '🛡️',
+    tag: 'Security Fleet', items: ['220 tác vụ tự động hóa', '12.4M tokens xử lý', 'RHEL 8/9 CIS Benchmark Level 1 & 2'] },
+  { id: 'cis_benchmark', x: .38, y: .88,  r: 18, color: '#10b981', glow: '#10b98180', label: 'CIS Spec', sub: 'RHEL 8/9 Hardening Spec', icon: '📋',
+    tag: 'Benchmark', items: ['ComplianceAsCode profile', 'Level 1 / Level 2 Workstation & Server', 'auditd, pam, sshd baseline'] },
+  { id: 'ansible_playbooks', x: .50, y: .90,  r: 18, color: '#06b6d4', glow: '#06b6d480', label: 'Ansible', sub: 'Hardening Automation', icon: '⚡',
+    tag: 'Automation', items: ['42 tác vụ chạy song song', 'sysctl kernel hardening', 'auto remediation scripts'] },
+  { id: 'compliance_auditor', x: .62, y: .88,  r: 18, color: '#f43f5e', glow: '#f43f5e80', label: 'Auditor', sub: 'OpenSCAP & PKI Verification', icon: '🔒',
+    tag: 'Audit', items: ['OpenSCAP scanner verification', 'SSH & TLS cipher audit', '59 lượt kiểm thử nghiệm thu'] },
+
+  // ── ProjectScriptOS Cluster (bottom-right) ──
+  { id: 'scriptos_hub',    x: .85, y: .74,  r: 32, color: '#a855f7', glow: '#a855f780', label: 'ProjectScriptOS', sub: 'OS Automation & Scripting', icon: '🖥️',
+    tag: 'OS Automation', items: ['AIX 7.2 + CentOS 7 + Win11 scripts', 'Unix LVM, HACMP & mksysb backup', 'PowerShell workstation automation'] },
+  { id: 'scriptos_aix',    x: .74, y: .88,  r: 18, color: '#8b5cf6', glow: '#8b5cf680', label: 'AIX 7.2', sub: 'AIX.7.2.SP8 Unix Scripts', icon: '📜',
+    tag: 'Unix', items: ['LVM, HACMP cluster maintenance', 'vios & mksysb backup scripts', 'perfpmr performance capture'] },
+  { id: 'scriptos_centos', x: .85, y: .90,  r: 18, color: '#10b981', glow: '#10b98180', label: 'CentOS 7', sub: 'Centos7 Linux Utilities', icon: '🐧',
+    tag: 'Linux', items: ['systemd service automation', 'crontab & logrotate schedules', 'auditd security rule scripts'] },
+  { id: 'scriptos_win',    x: .94, y: .88,  r: 18, color: '#38bdf8', glow: '#38bdf880', label: 'Win 11', sub: 'Win11 PowerShell', icon: '🪟',
+    tag: 'Windows', items: ['PowerShell system administration', 'Registry & networking automation', 'Desktop policy & performance tools'] },
+];
+
+const CONNECTIONS = [
+  // ── MCREDIT internal flows ──
+  { from: 'mcredit',     to: 'job_runner',    color: '#8b5cf6', label: 'schedule jobs' },
+  { from: 'job_runner',  to: 'r_scripts',     color: '#10b981', label: 'source()' },
+  { from: 'r_scripts',   to: 'r_modules',     color: '#8b5cf6', label: 'source modules' },
+  { from: 'r_scripts',   to: 'oracle_db',     color: '#f59e0b', label: 'JDBC query' },
+  { from: 'r_scripts',   to: 't24_files',     color: '#10b981', label: 'fread()' },
+  { from: 'r_modules',   to: 'mail_server',   color: '#f43f5e', label: 'SMTP send' },
+  { from: 'r_modules',   to: 'telegram',      color: '#f43f5e', label: 'Bot API' },
+  { from: 'r_modules',   to: 'elk',           color: '#f43f5e', label: 'JSON logs' },
+  { from: 'job_runner',  to: 'elk',           color: '#10b981', label: 'status logs' },
+  { from: 'r_scripts',   to: 'deploy_server', color: '#10b981', label: 'SCP upload' },
+
+  // ── TokenMonitor internal flows ──
+  { from: 'tokenmonitor',to: 'tailer',        color: '#06b6d4', label: 'goroutine' },
+  { from: 'tailer',      to: 'buffer',        color: '#06b6d4', label: 'event push' },
+  { from: 'buffer',      to: 'sqlite',        color: '#f59e0b', label: 'batch insert' },
+  { from: 'sqlite',      to: 'repository',    color: '#06b6d4', label: 'SQL queries' },
+  { from: 'repository',  to: 'handler',       color: '#06b6d4', label: 'Go method' },
+  { from: 'handler',     to: 'dashboard',     color: '#38bdf8', label: 'REST API' },
+  { from: 'detector',    to: 'repository',    color: '#10b981', label: 'OAuth tier' },
+  { from: 'config_tm',   to: 'tailer',        color: '#10b981', label: 'load config' },
+  { from: 'sqlite',      to: 'backup',        color: '#f59e0b', label: 'VACUUM INTO' },
+
+  // ── Hardening Linux flows ──
+  { from: 'hardening_hub',     to: 'cis_benchmark',      color: '#f59e0b', label: 'CIS Spec' },
+  { from: 'cis_benchmark',     to: 'ansible_playbooks',   color: '#10b981', label: 'Playbook Gen' },
+  { from: 'ansible_playbooks', to: 'compliance_auditor',  color: '#06b6d4', label: 'Verify Audit' },
+  { from: 'compliance_auditor', to: 'hardening_hub',      color: '#f43f5e', label: 'Audit Report' },
+
+  // ── ProjectScriptOS internal flows ──
+  { from: 'scriptos_hub',      to: 'scriptos_aix',      color: '#8b5cf6', label: 'AIX Scripts' },
+  { from: 'scriptos_hub',      to: 'scriptos_centos',   color: '#10b981', label: 'CentOS Scripts' },
+  { from: 'scriptos_hub',      to: 'scriptos_win',      color: '#38bdf8', label: 'PowerShell' },
+
+  // ── Cross-system flows (the bridge!) ──
+  { from: 'gemini',      to: 'antigravity',   color: '#f43f5e', label: 'LLM API', thick: true },
+  { from: 'antigravity', to: 'transcript',    color: '#38bdf8', label: 'appends logs', thick: true },
+  { from: 'transcript',  to: 'tailer',        color: '#06b6d4', label: 'read-only', thick: true },
+  { from: 'antigravity', to: 'mcredit',       color: '#8b5cf6', label: 'develops R code', dashed: true },
+  { from: 'antigravity', to: 'tokenmonitor',  color: '#06b6d4', label: 'develops Go code', dashed: true },
+  { from: 'antigravity', to: 'hardening_hub', color: '#f59e0b', label: 'develops Ansible/OS', dashed: true },
+  { from: 'antigravity', to: 'scriptos_hub',  color: '#a855f7', label: 'develops OS scripts', dashed: true },
+  { from: 'detector',    to: 'antigravity',   color: '#10b981', label: 'state.vscdb', dashed: true },
+
+  // ── Google Drive shared ──
+  { from: 'mcredit',     to: 'google_drive',  color: '#10b981', label: 'ProjectR/', dashed: true },
+  { from: 'tokenmonitor',to: 'google_drive',  color: '#10b981', label: 'ProjectGolang/', dashed: true },
+  { from: 'hardening_hub',to: 'google_drive', color: '#10b981', label: 'Tiêu_Chuẩn_Config/', dashed: true },
+  { from: 'scriptos_hub', to: 'google_drive', color: '#10b981', label: 'ProjectScriptOS/', dashed: true },
+  { from: 'google_drive',to: 'docs_portal',   color: '#38bdf8', label: 'docs/', dashed: true },
+];
+
+// ═══════════════════════════════════════════════════
+//  RENDERING ENGINE
+// ═══════════════════════════════════════════════════
+
+const bgCanvas = document.getElementById('bg-canvas');
+const bgCtx = bgCanvas.getContext('2d');
+const mainCanvas = document.getElementById('main-canvas');
+const ctx = mainCanvas.getContext('2d');
+const tooltip = document.getElementById('tooltip');
+let W, H, dpr;
+let hoveredNode = null;
+let paused = false;
+let speedMul = 1;
+let frameCount = 0;
+let lastFpsTime = performance.now();
+let fps = 0;
+
+// Particles along connections
+class Particle {
+  constructor(conn) {
+    this.conn = conn;
+    this.t = 0;
+    this.speed = (.002 + Math.random() * .003) * speedMul;
+    this.size = 2 + Math.random() * 2.5;
+    this.alpha = .6 + Math.random() * .4;
+  }
+  update() {
+    this.t += this.speed * speedMul;
+    if (this.t > 1) this.t -= 1;
+  }
+  getPos() {
+    const from = getNodeById(this.conn.from);
+    const to = getNodeById(this.conn.to);
+    if (!from || !to) return null;
+    const fx = from.x * W, fy = from.y * H;
+    const tx = to.x * W, ty = to.y * H;
+    // Slight curve via quadratic bezier
+    const mx = (fx + tx) / 2, my = (fy + ty) / 2;
+    const dx = tx - fx, dy = ty - fy;
+    const nx = -dy * .12, ny = dx * .12;
+    const cx = mx + nx, cy = my + ny;
+    const t = this.t;
+    const x = (1-t)*(1-t)*fx + 2*(1-t)*t*cx + t*t*tx;
+    const y = (1-t)*(1-t)*fy + 2*(1-t)*t*cy + t*t*ty;
+    return { x, y };
+  }
+}
+
+let particles = [];
+function initParticles() {
+  particles = [];
+  CONNECTIONS.forEach(conn => {
+    const count = conn.thick ? 6 : 3;
+    for (let i = 0; i < count; i++) {
+      const p = new Particle(conn);
+      p.t = Math.random();
+      particles.push(p);
+    }
+  });
+}
+
+function getNodeById(id) {
+  return NODES.find(n => n.id === id);
+}
+
+// Background stars
+const stars = [];
+function initStars() {
+  for (let i = 0; i < 120; i++) {
+    stars.push({
+      x: Math.random(),
+      y: Math.random(),
+      r: .3 + Math.random() * 1.2,
+      alpha: .1 + Math.random() * .4,
+      pulse: .5 + Math.random() * 2,
+    });
+  }
+}
+
+function resize() {
+  dpr = window.devicePixelRatio || 1;
+  const rect = document.getElementById('canvas-wrap').getBoundingClientRect();
+  W = rect.width;
+  H = rect.height;
+  [bgCanvas, mainCanvas].forEach(c => {
+    c.width = W * dpr;
+    c.height = H * dpr;
+    c.style.width = W + 'px';
+    c.style.height = H + 'px';
+    c.getContext('2d').setTransform(dpr, 0, 0, dpr, 0, 0);
+  });
+}
+
+function drawBg(time) {
+  bgCtx.clearRect(0, 0, W, H);
+
+  // Subtle radial gradient
+  const grd = bgCtx.createRadialGradient(W*.5, H*.35, 0, W*.5, H*.35, W*.6);
+  grd.addColorStop(0, 'rgba(6, 182, 212, .03)');
+  grd.addColorStop(.5, 'rgba(139, 92, 246, .02)');
+  grd.addColorStop(1, 'transparent');
+  bgCtx.fillStyle = grd;
+  bgCtx.fillRect(0, 0, W, H);
+
+  // Stars
+  stars.forEach(s => {
+    const pulse = Math.sin(time * .001 * s.pulse) * .15 + .85;
+    bgCtx.beginPath();
+    bgCtx.arc(s.x * W, s.y * H, s.r, 0, Math.PI * 2);
+    bgCtx.fillStyle = `rgba(148, 163, 184, ${s.alpha * pulse})`;
+    bgCtx.fill();
+  });
+
+  // Grid dots
+  const gridSize = 50;
+  bgCtx.fillStyle = 'rgba(30, 41, 59, .25)';
+  for (let gx = gridSize; gx < W; gx += gridSize) {
+    for (let gy = gridSize; gy < H; gy += gridSize) {
+      bgCtx.fillRect(gx - .5, gy - .5, 1, 1);
+    }
+  }
+}
+
+function drawConnections(time) {
+  CONNECTIONS.forEach(conn => {
+    const from = getNodeById(conn.from);
+    const to = getNodeById(conn.to);
+    if (!from || !to) return;
+
+    const fx = from.x * W, fy = from.y * H;
+    const tx = to.x * W, ty = to.y * H;
+    const mx = (fx + tx) / 2, my = (fy + ty) / 2;
+    const dx = tx - fx, dy = ty - fy;
+    const nx = -dy * .12, ny = dx * .12;
+    const cx = mx + nx, cy = my + ny;
+
+    const isHovered = hoveredNode && (hoveredNode.id === conn.from || hoveredNode.id === conn.to);
+    const alpha = isHovered ? .6 : .15;
+    const width = conn.thick ? 2.5 : 1.2;
+
+    ctx.beginPath();
+    ctx.moveTo(fx, fy);
+    ctx.quadraticCurveTo(cx, cy, tx, ty);
+    ctx.strokeStyle = conn.color + (isHovered ? 'cc' : '40');
+    ctx.lineWidth = width;
+    if (conn.dashed) ctx.setLineDash([6, 4]);
+    else ctx.setLineDash([]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Connection label (only when hovered)
+    if (isHovered && conn.label) {
+      const lt = .5;
+      const lx = (1-lt)*(1-lt)*fx + 2*(1-lt)*lt*cx + lt*lt*tx;
+      const ly = (1-lt)*(1-lt)*fy + 2*(1-lt)*lt*cy + lt*lt*ty;
+      ctx.font = '600 10px Inter';
+      ctx.fillStyle = conn.color;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'bottom';
+
+      // Label background
+      const tw = ctx.measureText(conn.label).width + 10;
+      ctx.fillStyle = 'rgba(6, 9, 19, .85)';
+      ctx.beginPath();
+      ctx.roundRect(lx - tw/2, ly - 18, tw, 16, 4);
+      ctx.fill();
+      ctx.fillStyle = conn.color;
+      ctx.fillText(conn.label, lx, ly - 5);
+    }
+  });
+}
+
+function drawNodes(time) {
+  NODES.forEach(node => {
+    const x = node.x * W;
+    const y = node.y * H;
+    const r = node.r;
+    const isHovered = hoveredNode && hoveredNode.id === node.id;
+    const isConnected = hoveredNode && CONNECTIONS.some(c =>
+      (c.from === hoveredNode.id && c.to === node.id) ||
+      (c.to === hoveredNode.id && c.from === node.id)
+    );
+    const dim = hoveredNode && !isHovered && !isConnected;
+
+    // Glow
+    const pulse = Math.sin(time * .002 + NODES.indexOf(node)) * .15 + .85;
+    const glowR = r * (isHovered ? 2.8 : 1.8) * pulse;
+    const grd = ctx.createRadialGradient(x, y, r * .3, x, y, glowR);
+    grd.addColorStop(0, node.glow);
+    grd.addColorStop(1, 'transparent');
+    ctx.fillStyle = grd;
+    ctx.globalAlpha = dim ? .15 : (isHovered ? .8 : .4);
+    ctx.beginPath();
+    ctx.arc(x, y, glowR, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+
+    // Node circle
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    const ngrd = ctx.createRadialGradient(x - r * .3, y - r * .3, 0, x, y, r);
+    ngrd.addColorStop(0, node.color + (dim ? '60' : 'ff'));
+    ngrd.addColorStop(1, node.color + (dim ? '30' : '80'));
+    ctx.fillStyle = ngrd;
+    ctx.fill();
+
+    if (isHovered) {
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+
+    // Icon
+    ctx.font = `${r * .65}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.globalAlpha = dim ? .3 : 1;
+    ctx.fillText(node.icon, x, y);
+    ctx.globalAlpha = 1;
+
+    // Label below
+    ctx.font = `600 ${Math.max(11, r * .38)}px Inter`;
+    ctx.fillStyle = dim ? '#475569' : '#f1f5f9';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    ctx.fillText(node.label, x, y + r + 6);
+
+    // Sub label
+    if (!dim) {
+      ctx.font = `400 ${Math.max(9, r * .28)}px "JetBrains Mono"`;
+      ctx.fillStyle = '#64748b';
+      ctx.fillText(node.sub, x, y + r + 21);
+    }
+  });
+}
+
+function drawParticles(time) {
+  particles.forEach(p => {
+    if (!paused) p.update();
+    const pos = p.getPos();
+    if (!pos) return;
+
+    const conn = p.conn;
+    const isHovered = hoveredNode && (hoveredNode.id === conn.from || hoveredNode.id === conn.to);
+    const alpha = isHovered ? p.alpha : p.alpha * .5;
+
+    // Particle glow
+    const grd = ctx.createRadialGradient(pos.x, pos.y, 0, pos.x, pos.y, p.size * 3);
+    grd.addColorStop(0, conn.color + Math.round(alpha * 200).toString(16).padStart(2, '0'));
+    grd.addColorStop(1, 'transparent');
+    ctx.fillStyle = grd;
+    ctx.beginPath();
+    ctx.arc(pos.x, pos.y, p.size * 3, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Particle core
+    ctx.beginPath();
+    ctx.arc(pos.x, pos.y, p.size, 0, Math.PI * 2);
+    ctx.fillStyle = conn.color;
+    ctx.globalAlpha = alpha;
+    ctx.fill();
+
+    // White photon core dot
+    ctx.beginPath();
+    ctx.arc(pos.x, pos.y, p.size * 0.45, 0, Math.PI * 2);
+    ctx.fillStyle = '#ffffff';
+    ctx.globalAlpha = Math.min(1, alpha * 1.3);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  });
+}
+
+// ── Arrowheads on connections (animated) ──
+function drawArrows(time) {
+  CONNECTIONS.forEach(conn => {
+    const from = getNodeById(conn.from);
+    const to = getNodeById(conn.to);
+    if (!from || !to) return;
+
+    const fx = from.x * W, fy = from.y * H;
+    const tx = to.x * W, ty = to.y * H;
+    const mx = (fx + tx) / 2, my = (fy + ty) / 2;
+    const dx = tx - fx, dy = ty - fy;
+    const nx = -dy * .12, ny = dx * .12;
+    const cx = mx + nx, cy = my + ny;
+
+    // Animated arrow position (pulsing along the path)
+    const baseT = ((time * .0003 * speedMul) % 1);
+    const isHovered = hoveredNode && (hoveredNode.id === conn.from || hoveredNode.id === conn.to);
+
+    // Draw 2 arrows along path
+    for (let i = 0; i < 2; i++) {
+      let t = (baseT + i * .5) % 1;
+      const ax = (1-t)*(1-t)*fx + 2*(1-t)*t*cx + t*t*tx;
+      const ay = (1-t)*(1-t)*fy + 2*(1-t)*t*cy + t*t*ty;
+
+      // Tangent direction
+      const dt = .01;
+      const t2 = Math.min(t + dt, 1);
+      const bx = (1-t2)*(1-t2)*fx + 2*(1-t2)*t2*cx + t2*t2*tx;
+      const by = (1-t2)*(1-t2)*fy + 2*(1-t2)*t2*cy + t2*t2*ty;
+      const angle = Math.atan2(by - ay, bx - ax);
+
+      const arrowSize = conn.thick ? 7 : 5;
+      const alpha = isHovered ? .9 : .35;
+
+      ctx.save();
+      ctx.translate(ax, ay);
+      ctx.rotate(angle);
+      ctx.beginPath();
+      ctx.moveTo(arrowSize, 0);
+      ctx.lineTo(-arrowSize, -arrowSize * .6);
+      ctx.lineTo(-arrowSize * .4, 0);
+      ctx.lineTo(-arrowSize, arrowSize * .6);
+      ctx.closePath();
+      ctx.fillStyle = conn.color;
+      ctx.globalAlpha = alpha;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.restore();
+    }
+  });
+}
+
+function updateStats() {
+  document.getElementById('stat-nodes').textContent = NODES.length;
+  document.getElementById('stat-conns').textContent = CONNECTIONS.length;
+  document.getElementById('stat-particles').textContent = particles.length;
+  document.getElementById('stat-fps').textContent = fps;
+}
+
+function render(time) {
+  frameCount++;
+  if (time - lastFpsTime >= 1000) {
+    fps = frameCount;
+    frameCount = 0;
+    lastFpsTime = time;
+    updateStats();
+  }
+
+  drawBg(time);
+  ctx.clearRect(0, 0, W, H);
+  drawConnections(time);
+  drawParticles(time);
+  drawArrows(time);
+  drawNodes(time);
+
+  requestAnimationFrame(render);
+}
+
+// ── Mouse interaction ──
+mainCanvas.addEventListener('mousemove', e => {
+  const rect = mainCanvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const my = e.clientY - rect.top;
+
+  let found = null;
+  for (const node of NODES) {
+    const nx = node.x * W, ny = node.y * H;
+    const dist = Math.hypot(mx - nx, my - ny);
+    if (dist < node.r + 10) {
+      found = node;
+      break;
+    }
+  }
+
+  hoveredNode = found;
+  mainCanvas.style.cursor = found ? 'pointer' : 'default';
+
+  if (found) {
+    tooltip.classList.add('show');
+    document.getElementById('tt-title').textContent = found.icon + ' ' + found.label;
+    document.getElementById('tt-sub').textContent = found.sub;
+    document.getElementById('tt-tag').textContent = found.tag;
+    const itemsList = document.getElementById('tt-items');
+    itemsList.innerHTML = found.items.map(i => `<li>${i}</li>`).join('');
+
+    let tx = e.clientX + 16, ty = e.clientY - 10;
+    if (tx + 330 > window.innerWidth) tx = e.clientX - 340;
+    if (ty + 200 > window.innerHeight) ty = e.clientY - 200;
+    tooltip.style.left = tx + 'px';
+    tooltip.style.top = ty + 'px';
+  } else {
+    tooltip.classList.remove('show');
+  }
+});
+
+mainCanvas.addEventListener('mouseleave', () => {
+  hoveredNode = null;
+  tooltip.classList.remove('show');
+});
+
+// ── Controls ──
+document.getElementById('btn-speed-normal').addEventListener('click', () => {
+  speedMul = 1;
+  document.getElementById('btn-speed-normal').classList.add('active');
+  document.getElementById('btn-speed-fast').classList.remove('active');
+});
+document.getElementById('btn-speed-fast').addEventListener('click', () => {
+  speedMul = 3;
+  document.getElementById('btn-speed-fast').classList.add('active');
+  document.getElementById('btn-speed-normal').classList.remove('active');
+});
+document.getElementById('btn-pause').addEventListener('click', function() {
+  paused = !paused;
+  this.textContent = paused ? '▶ Play' : '⏸ Pause';
+  this.classList.toggle('active', paused);
+});
+
+// ── Init ──
+window.addEventListener('resize', () => { resize(); });
+resize();
+initStars();
+initParticles();
+requestAnimationFrame(render);
+</script>
+</body>
+</html>

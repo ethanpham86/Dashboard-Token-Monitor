@@ -1,0 +1,458 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "TokenMonitor Architecture & Local Isolation Boundary",
+    "output": "tokenmonitor-architecture.html",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "full-system",
+        "label": "Toàn Bộ Kiến Trúc & Ranh Giới",
+        "focus": [
+          "antigravity-ide",
+          "google-gemini",
+          "ide-transcript",
+          "ide-auth",
+          "config-file",
+          "local-tailer",
+          "ring-buffer",
+          "storage-worker",
+          "sqlite-db",
+          "api-server",
+          "dashboard-ui",
+          "user-browser"
+        ],
+        "note": "Tổng quan toàn bộ hệ thống từ client, file log cục bộ đến dashboard."
+      },
+      {
+        "id": "passive-ingestion",
+        "label": "Luồng Thu Thập Thụ Động (Zero Outbound)",
+        "focus": [
+          "antigravity-ide",
+          "ide-transcript",
+          "ide-auth",
+          "config-file",
+          "local-tailer",
+          "ring-buffer"
+        ],
+        "note": "Quy trình đọc log nội bộ không gửi bất kỳ request mạng nào ra ngoài Internet."
+      },
+      {
+        "id": "storage-pipeline",
+        "label": "Tầng Lưu Trữ & Hourly Rollup",
+        "focus": [
+          "ring-buffer",
+          "storage-worker",
+          "sqlite-db",
+          "api-server"
+        ],
+        "note": "Xử lý hàng đợi không khóa và tổng hợp dữ liệu tốc độ cao trên SQLite WAL mode."
+      },
+      {
+        "id": "visual-dashboard",
+        "label": "Bảng Điều Khiển FinOps & Người Dùng",
+        "focus": [
+          "sqlite-db",
+          "api-server",
+          "dashboard-ui",
+          "user-browser"
+        ],
+        "note": "Cung cấp số liệu thời gian thực và biểu đồ trực quan không cần cuộn chuột."
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "google-gemini",
+      "type": "cloud",
+      "label": "Google Gemini Cloud",
+      "sublabel": "External LLM Engine",
+      "pos": [
+        60,
+        60
+      ],
+      "size": [
+        160,
+        64
+      ],
+      "brand": "google-gemini"
+    },
+    {
+      "id": "antigravity-ide",
+      "type": "frontend",
+      "label": "Antigravity IDE",
+      "sublabel": "Developer Workspace",
+      "pos": [
+        60,
+        220
+      ],
+      "size": [
+        160,
+        64
+      ]
+    },
+    {
+      "id": "ide-transcript",
+      "type": "external",
+      "label": "transcript.jsonl",
+      "sublabel": "Local SSD Log",
+      "pos": [
+        60,
+        390
+      ],
+      "size": [
+        160,
+        64
+      ],
+      "tag": "O_RDONLY"
+    },
+    {
+      "id": "ide-auth",
+      "type": "security",
+      "label": "state.vscdb",
+      "sublabel": "Session & Tier",
+      "pos": [
+        60,
+        540
+      ],
+      "size": [
+        160,
+        64
+      ],
+      "tag": "mode=ro"
+    },
+    {
+      "id": "config-file",
+      "type": "backend",
+      "label": "config.yaml",
+      "sublabel": "Cấu hình trung tâm",
+      "pos": [
+        340,
+        540
+      ],
+      "size": [
+        160,
+        64
+      ],
+      "tag": "Port 9090, DB"
+    },
+    {
+      "id": "local-tailer",
+      "type": "backend",
+      "label": "tailer.go",
+      "sublabel": "Quét delta 10s",
+      "pos": [
+        340,
+        390
+      ],
+      "size": [
+        160,
+        64
+      ],
+      "brand": "go"
+    },
+    {
+      "id": "ring-buffer",
+      "type": "messagebus",
+      "label": "buffer.go",
+      "sublabel": "Async Queue (1,000)",
+      "pos": [
+        600,
+        390
+      ],
+      "size": [
+        160,
+        64
+      ],
+      "tag": "Non-blocking"
+    },
+    {
+      "id": "storage-worker",
+      "type": "backend",
+      "label": "repository.go",
+      "sublabel": "Rollup & FinOps Engine",
+      "pos": [
+        860,
+        390
+      ],
+      "size": [
+        160,
+        64
+      ],
+      "brand": "go"
+    },
+    {
+      "id": "sqlite-db",
+      "type": "database",
+      "label": "SQLite WAL (ERD)",
+      "sublabel": "token_monitor.db",
+      "pos": [
+        1120,
+        390
+      ],
+      "size": [
+        160,
+        64
+      ],
+      "brand": "sqlite",
+      "tag": "WAL Mode"
+    },
+    {
+      "id": "api-server",
+      "type": "backend",
+      "label": "handler.go",
+      "sublabel": "net/http (:9090)",
+      "pos": [
+        1120,
+        220
+      ],
+      "size": [
+        160,
+        64
+      ],
+      "brand": "go"
+    },
+    {
+      "id": "dashboard-ui",
+      "type": "frontend",
+      "label": "Dashboard UI",
+      "sublabel": "index.html & FinOps Modal",
+      "pos": [
+        820,
+        220
+      ],
+      "size": [
+        180,
+        64
+      ],
+      "tag": "FinOps & Telemetry"
+    },
+    {
+      "id": "user-browser",
+      "type": "external",
+      "label": "User Browser",
+      "sublabel": "Localhost UI Client",
+      "pos": [
+        520,
+        220
+      ],
+      "size": [
+        160,
+        64
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Local Workstation Boundary (100% Offline & Isolated)",
+      "wraps": [
+        "antigravity-ide",
+        "ide-transcript",
+        "ide-auth",
+        "config-file",
+        "local-tailer",
+        "ring-buffer",
+        "storage-worker",
+        "sqlite-db",
+        "api-server",
+        "dashboard-ui",
+        "user-browser"
+      ]
+    },
+    {
+      "kind": "security-group",
+      "label": "TokenMonitor Local Process (127.0.0.1)",
+      "wraps": [
+        "config-file",
+        "local-tailer",
+        "ring-buffer",
+        "storage-worker",
+        "sqlite-db",
+        "api-server",
+        "dashboard-ui"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "ide-to-cloud",
+      "from": "antigravity-ide",
+      "to": "google-gemini",
+      "label": "Direct TLS :443",
+      "variant": "default",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "ide-to-transcript",
+      "from": "antigravity-ide",
+      "to": "ide-transcript",
+      "label": "appends logs",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelAt": [
+        140,
+        337
+      ]
+    },
+    {
+      "id": "ide-to-auth",
+      "from": "antigravity-ide",
+      "to": "ide-auth",
+      "label": "session info",
+      "variant": "dashed",
+      "fromSide": "left",
+      "toSide": "left",
+      "via": [
+        [
+          20,
+          252
+        ],
+        [
+          20,
+          572
+        ]
+      ],
+      "labelAt": [
+        20,
+        480
+      ]
+    },
+    {
+      "id": "cfg-to-tailer",
+      "from": "config-file",
+      "to": "local-tailer",
+      "label": "nạp cấu hình",
+      "variant": "default",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "tailer-read-log",
+      "from": "ide-transcript",
+      "to": "local-tailer",
+      "label": "os.Open (read-only)",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "detector-read-auth",
+      "from": "ide-auth",
+      "to": "storage-worker",
+      "label": "sqlite mode=ro",
+      "variant": "security",
+      "fromSide": "bottom",
+      "toSide": "bottom",
+      "via": [
+        [
+          140,
+          630
+        ],
+        [
+          940,
+          630
+        ]
+      ],
+      "labelAt": [
+        500,
+        620
+      ]
+    },
+    {
+      "id": "tailer-to-buffer",
+      "from": "local-tailer",
+      "to": "ring-buffer",
+      "label": "event push",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "buffer-to-worker",
+      "from": "ring-buffer",
+      "to": "storage-worker",
+      "label": "drain batch",
+      "variant": "default",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "worker-to-db",
+      "from": "storage-worker",
+      "to": "sqlite-db",
+      "label": "batch insert",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "db-to-api",
+      "from": "sqlite-db",
+      "to": "api-server",
+      "label": "SQL queries",
+      "variant": "default",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "api-to-ui",
+      "from": "api-server",
+      "to": "dashboard-ui",
+      "label": "REST API",
+      "variant": "emphasis",
+      "fromSide": "left",
+      "toSide": "right"
+    },
+    {
+      "id": "ui-to-browser",
+      "from": "dashboard-ui",
+      "to": "user-browser",
+      "label": "HTTP :9090",
+      "variant": "default",
+      "fromSide": "left",
+      "toSide": "right"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "Nơi Cấu Hình & Thu Thập Thụ Động",
+      "items": [
+        "File config.yaml điều phối cổng 9090, đường dẫn SQLite và tần suất quét",
+        "Trình collector/tailer.go đọc delta file transcript.jsonl theo offset (10s/lần)",
+        "Trình storage/detector.go nhận diện phiên Google Ultra/Pro an toàn từ state.vscdb (mode=ro, zero mật khẩu)"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "Bộ Đệm Async & CSDL Quan Hệ ERD",
+      "items": [
+        "Hàng đợi collector/buffer.go đệm 1,000 sự kiện, tự động xả batch 100 bản ghi/1s",
+        "Cấu trúc ERD 4 bảng: accounts (cha), auth_sessions, token_usage_logs và hourly_rollup",
+        "SQLite WAL Mode đọc ghi song song, triệt tiêu hoàn toàn nguy cơ khóa CSDL"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "REST API & Dashboard Trực Quan",
+      "items": [
+        "web/handler.go cung cấp các REST API endpoints phản hồi dưới 10ms từ dữ liệu rollup",
+        "Giao diện web/static/index.html hiển thị biểu đồ Donut mở rộng và phân tích đa model",
+        "Tích hợp đếm ngược chu kỳ gói Ultra và tỷ lệ sử dụng Context Cache thời gian thực"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "Động Cơ FinOps & Quy Đổi USD/VNĐ",
+      "items": [
+        "storage/repository.go tính toán chi phí theo bảng giá chính thức Google Cloud Vertex AI & Gemini (Ultra/Pro/Flash)",
+        "Context Caching tự động giảm 75% chi phí Prompt, đo lường chính xác số tiền tiết kiệm và tổng giá trị gộp",
+        "Web Dashboard tích hợp Thẻ KPI thứ 6 (#card-finops-usd), cột Est. USD trong bảng lịch sử và Bộ máy tính FinOps quy đổi sang VNĐ"
+      ]
+    }
+  ]
+}
