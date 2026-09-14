@@ -2,6 +2,9 @@
 
 Hệ thống giám sát, phân tích chuyên sâu lưu lượng Token (Prompt, CoT Thinking, Output, Context Caching) và tần suất sử dụng mô hình AI (Gemini 3.8/3.7 Flash, Pro, Ultra, Claude Sonnet/Opus, GPT-OSS 120B) theo thời gian thực dành cho máy trạm cá nhân và đội ngũ kỹ thuật.
 
+> **Git Repository**: `https://github.com/ethanpham86/Dashboard-Token-Monitor.git`  
+> **Chính Sách Bảo Mật Git**: Loại trừ nghiêm ngặt toàn bộ các tệp markdown định nghĩa kỹ năng (`**/*skill*.md`, `skills/`) khỏi kho Git repository theo cấu hình `.gitignore` và quy tắc an toàn thông tin máy trạm.
+
 ---
 
 ## 🚀 Khởi Chạy Nhanh
@@ -100,12 +103,18 @@ Mỗi tab của từng loại AI đều sở hữu đầy đủ toàn bộ các 
    * **📊 Tổng Quan & Đa Model**: Biểu đồ Chart.js Timeline 3 chế độ (Token / Model / Calls) + Apache ECharts Donut phân bổ tỷ lệ và Timeline xu hướng theo từng model kèm các Chip lọc tương tác.
    * **📅 Bảng Lịch Sử Chi Tiết**: Bảng thống kê tiêu thụ chi tiết chuẩn 10 cột theo ngày/giờ (Prompt, Thinking, Output, Cache, Cache %, Cuộc gọi, Tốc độ, USD) + Bảng danh sách phiên/dự án thực tế.
    * **🤖 Multi-Agent Fleet & Topology**: 4 thẻ KPI Tác nhân, đồ thị mạng lưới phân cấp 4 tầng 60 FPS với hiệu ứng dòng chảy năng lượng GPU-accelerated:
+     - **3 Chế Độ Bố Cục Đồ Thị (Layout Modes)**:
+       * 📌 **Cố Định (`pinned`)**: Phân cấp 4 tầng kim tự tháp với tọa độ Golang tính sẵn ($canvasCX=1500, stepX=780$), gán `fixed: true` ổn định 100%.
+       * 🧲 **Tự Do (`force`)**: Áp dụng **Quy luật tương tác vật lý động 4 tầng (Force Physics Scaling Law)** ($N > 40 \to 2200$, $N > 25 \to 1800$, $N > 12 \to 1200$, $N \le 12 \to 800$, `edgeLength: [100, 200] - [180, 350]`, `gravity: 0.03 - 0.06`, `initLayout: 'circular'`, `friction: 0.65`). Tuân thủ nghiêm ngặt **Quy tắc cách ly tọa độ tuyệt đối** (`x: undefined, y: undefined, fixed: false`) ngăn ngừa văng vào góc màn hình.
+       * ⭕ **Vòng Tròn (`circular`)**: Phân bổ đối xứng tỏa tròn quanh tâm, `rotateLabel: true`, cách ly tọa độ và căn giữa hoàn hảo.
+     - **Quy Chuẩn Lọc Dự Án Hoạt Động Trong 1 Giờ (1-Hour Active Project Filtering Protocol)**: Chỉ nạp các dự án đang chạy (`IsRunning`) hoặc có hoạt động trong 75 phút gần nhất (`oneHourAgo = now - 75m`). Khi toàn bộ hệ thống nhàn rỗi, cơ chế fallback an toàn tự động giữ lại duy nhất 1 dự án gần nhất (`mostRecentProject`) tránh màn hình trắng trơn. Cho phép chọn dự án cụ thể từ dropdown để xem toàn bộ lịch sử.
      - **Neo Nhãn Đường Cong Chuẩn Xác (`edgeLabel`)**: Cấu hình chuẩn `edgeLabel` với `position: 'middle'` giúp nhãn số liệu (tokens, calls, loại luồng) bám sát chính xác vào vị trí trung điểm của đường cong Bezier.
      - **Đồng Bộ Tọa Độ Toàn Cục Sống (`transformCoordToGlobal`)**: Lớp canvas overlay `#topo-flow-overlay` tính toán tọa độ trung điểm nhãn `(lx, ly)` đồng bộ tuyệt đối với ma trận biến đổi tọa độ toàn cục khi người dùng Zoom / Pan / Roam, đảm bảo nhãn và đường nối không bao giờ bị lệch vị trí (Zero Drift).
      - **Hai Chế Độ Xem Nhãn**: Hỗ trợ đầy đủ chế độ tinh gọn `🏷️ Gọn Gàng` (hiện nhãn khi hover) và chế độ `📑 Hiện Tất Cả` (hiện nhãn tĩnh trên mọi đường truyền).
      - **Tự Động Chuyển Đổi Theo Provider (`syncAgentFleetControlsForProvider`)**: Khi chọn tab OpenAI Codex hoặc Anthropic Claude, hệ thống tự động ẩn các nút Dual View, Concurrency, Gantt và kích hoạt ngay đồ thị Topology tương ứng. Khi quay lại Google Antigravity, toàn bộ các nút điều khiển được tự động khôi phục.
      - **Tự Động Nhận Diện & Focus Vào Dự Án Đang Hoạt Động (Active Project Auto-Focus)**: Tự động phát hiện dự án đang có tác vụ `RUNNING` / `ACTIVE` (ví dụ: `TokenMonitor (GoLangDev)`), tự động chọn option trên dropdown và refetch/zoom vào riêng cụm dự án đang chạy mà không cần người dùng thao tác thủ công (`updateTopologyProjectSelect`, `loadAgentFleetData`).
-     - **Động Cơ Responsive Auto-Fit & Căn Giữa Động [midX, midY]**: Thuật toán `calculateTopologyAutoFit` tự động xác định bounding box của tập node, căn giữa hình học tại $[midX, midY]$, bổ sung đệm an toàn $160\text{px} \times 150\text{px}$ và co giãn tối ưu theo khung nhìn ($92\%$ width, $84\%$ height). Triệt tiêu hoàn toàn hiện tượng tràn lề ngang hay trôi lệch tọa độ khi tải lại trang (Anti-Drift Storage Contract).
+     - **Động Cơ Responsive Auto-Fit & Phân Rã Camera Độc Lập**: Thuật toán `calculateTopologyAutoFit` tự động căn giữa $[midX, midY]$, bổ sung đệm an toàn $160\text{px} \times 150\text{px}$ và co giãn tối ưu theo khung nhìn (Anti-Drift Storage Contract). Phân rã độc lập camera ECharts: chế độ Force/Circular bắt buộc gán `center: ['50%', '50%']` và `zoom: 0.85` để tránh lệch trục.
+     - **Triệt Tiêu Nhiễu Thị Giác (Zero Visual Redundancy)**: Tinh gọn kích thước nốt (Root 44px, Project 34px, Orch 28px, Subagent 22px), đường nối thanh mảnh, và loại bỏ hoàn toàn huy hiệu chữ tĩnh `⚡ RUNNING` pill đè dưới chân node, chỉ báo trạng thái bằng sóng nhịp radar và photon 60 FPS.
    * **🔲 Xem Toàn Bộ**: Cuộn mượt mà xem trọn gói toàn bộ dashboard trên một màn hình.
 3. **Bộ Điều Khiển Thời Gian Đơn Nhất (Single Unified Time-Range Controller)**:
    * Duy nhất 1 cụm 5 mốc thời gian chuẩn (`⚡ Hôm Nay`, `24 Giờ`, `7 Ngày`, `🗓️ 30 Ngày`, `♾️ Toàn Bộ`) ở góc phải thanh sub-navigation trên cùng, loại bỏ hoàn toàn hiện tượng trùng lặp nút gây rối mắt.

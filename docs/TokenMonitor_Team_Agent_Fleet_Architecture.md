@@ -21,6 +21,7 @@
    - 2.5. Thuật Toán Phân Giải Đa Dự Án Động (resolveSubagentProject)
    - 2.6. Điểm Kết Nối Gốc Tối Cao (Root Controller Node) & Ranh Giới Độc Lập Của 4 Cụm Dự Án (stepX = 780.0px)
    - 2.7. Phân Tích Kỹ Thuật: Ranh Giới Độc Lập, Ngưỡng Sống 45 Giây & Triết Lý Zero Fake Motion
+   - 2.8. Quy Chuẩn Lọc Dự Án Theo Ngưỡng Hoạt Động 1 Giờ (1-Hour Active Project Filtering Protocol)
 3. [Giao Thức Trao Đổi Đa Tác Nhân (Inter-Agent Exchange Streaming Protocols)](#3-giao-thức-trao-đổi-đa-tác-nhân-inter-agent-exchange-streaming-protocols)
    - 3.1. Phân loại 5 mẫu luồng dữ liệu (Dataflow Patterns)
    - 3.2. Cơ chế phân phối Token Budget & Context Handoff
@@ -344,6 +345,59 @@ Nhằm loại bỏ triệt để hiện tượng "dashboard hoạt hình giả l
 - Tắt hoàn toàn `edgeSymbol: ['none', 'none']` trong ECharts.
 - Thay thế hoàn toàn bằng động cơ Canvas Overlay `#topo-flow-overlay` vẽ mũi tên khí động học vi mạch siêu mảnh, loại bỏ triệt để xung đột thị giác giữa mũi tên tĩnh và luồng năng lượng chuyển động.
 
+### 2.8. Quy Chuẩn Lọc Dự Án Theo Ngưỡng Hoạt Động 1 Giờ (1-Hour Active Project Filtering Protocol)
+
+Trong môi trường làm việc thực tế với nhiều kho mã nguồn và phiên làm việc song song, nếu sơ đồ Topology luôn nạp toàn bộ tất cả các dự án trong lịch sử lên màn hình, không gian đồ thị sẽ trở nên chật chội, rối mắt và làm phân tán sự chú ý của kỹ sư vào các dự án đã dừng từ lâu.
+
+Để giải quyết triệt để vấn đề này, hàm `GetAgentTopologyGraph` tại `storage/repository.go:1889-1925` áp dụng **Quy chuẩn lọc dự án hoạt động trong vòng 1 giờ** ("*Dự án nào đang chạy thì load lên, nếu 1h không chạy thì ko load lên cho đỡ rối*"):
+
+```go
+// 2. Lọc theo projectFilter kết hợp quy tắc 1h ("Dự án nào đang chạy thì load lên, nếu 1h không chạy thì ko load lên cho đỡ rối")
+var activeProjects []*ProjectData
+filterClean := strings.ToLower(strings.TrimSpace(projectFilter))
+oneHourAgo := now.Add(-75 * time.Minute) // 1 giờ hoạt động (kèm 15 phút đệm an toàn)
+
+var mostRecentProject *ProjectData
+for _, p := range projectsMap {
+    if mostRecentProject == nil || p.LatestActivity.After(mostRecentProject.LatestActivity) {
+        mostRecentProject = p
+    }
+
+    if filterClean != "" && filterClean != "all" && filterClean != "workspace_overview" {
+        // Người dùng chỉ định xem 1 dự án cụ thể từ dropdown -> Luôn nạp đúng dự án được chọn
+        if !strings.EqualFold(p.ID, filterClean) &&
+            !strings.EqualFold(p.Name, filterClean) &&
+            !strings.EqualFold(strings.TrimPrefix(p.ID, "proj-"), filterClean) {
+            continue
+        }
+    } else {
+        // Chế độ "all" / mặc định: Chỉ load dự án ĐANG CHẠY hoặc CÓ HOẠT ĐỘNG TRONG VÒNG 1 GIỜ GẦN NHẤT
+        isActiveOrRecent := p.IsRunning || (!p.LatestActivity.IsZero() && p.LatestActivity.After(oneHourAgo))
+        if !isActiveOrRecent {
+            continue
+        }
+    }
+    activeProjects = append(activeProjects, p)
+}
+
+// Fallback an toàn: Nếu không có dự án nào đang chạy và không có dự án nào trong 1h, giữ lại duy nhất 1 dự án gần nhất
+if len(activeProjects) == 0 && mostRecentProject != nil {
+    activeProjects = append(activeProjects, mostRecentProject)
+}
+```
+
+#### Bốn Nguyên Tắc Kỹ Thuật Cốt Lõi:
+1. **Cửa Sổ Thời Gian 1 Giờ Kèm 15 Phút Đệm An Toàn (`now - 75m`)**:
+   - `oneHourAgo` được tính toán bằng `now.Add(-75 * time.Minute)`. Khoảng đệm 15 phút an toàn (grace period) ngăn chặn triệt để hiện tượng dự án vừa ngưng tác vụ trong tích tắc bị biến mất ngay khỏi đồ thị khi kỹ sư đang theo dõi.
+2. **Tiêu Chí Nhận Diện Dự Án Hoạt Động (`isActiveOrRecent`)**:
+   - Dự án được giữ lại nếu thỏa mãn một trong hai điều kiện:
+     * `p.IsRunning == true` (dự án đang có tác vụ đang chạy thực tế).
+     * `!p.LatestActivity.IsZero() && p.LatestActivity.After(oneHourAgo)` (dự án có hoạt động được ghi nhận trong vòng 75 phút gần nhất).
+3. **Cơ Chế Fallback An Toàn 1 Dự Án Gần Nhất (Zero-Blank Graph Guard)**:
+   - Trong trường hợp toàn bộ hệ thống nhàn rỗi (không có dự án nào `IsRunning` và tất cả các dự án đều dừng hoạt động cách đây hơn 75 phút), tập `activeProjects` sẽ rỗng.
+   - Thay vì trả về một đồ thị trống trơn (blank graph) gây khó hiểu cho người dùng, cơ chế fallback tự động kích hoạt: Giữ lại **duy nhất 1 dự án có hoạt động gần đây nhất (`mostRecentProject`)**. Điều này bảo đảm màn hình luôn hiển thị ít nhất 1 cụm dự án mẫu mực đại diện cho kiến trúc hạm đội, không bao giờ bị trắng màn hình.
+4. **Quyền Ghi Đè Thủ Công Từ Dropdown (Explicit Project Selection Override)**:
+   - Khi kỹ sư chủ động chọn một dự án cụ thể từ menu dropdown (`filterClean != "" && filterClean != "all" && filterClean != "workspace_overview"`), quy tắc 1 giờ được bỏ qua (bypass), hệ thống luôn nạp đầy đủ dự án được chỉ định để người dùng tra cứu toàn bộ cấu trúc mạng lưới và lịch sử tác vụ bất kể đã dừng bao lâu.
 
 ---
 
@@ -387,15 +441,46 @@ Trên Topology Network Graph, mối quan hệ giữa các Node được mã hóa
 ## 4. Động Cơ Hoạt Họa & Biểu Diễn Đồ Thị Mạng Lưới (Topology Graph & Flowing Energy Engine)
 
 ### 4.1. Ba chế độ bố cục đồ thị (Layout Modes)
-1. **Ghim Cố Định (`pinned` / `none`)**:
-   - Tọa độ $(X, Y)$ của từng Node được tính toán giải thuật phân tầng hình cây (Hierarchical Tree) bởi Golang Backend (`canvasCX = 1500.0, stepX = 780.0`).
-   - Root Controller ở Tầng 0 ($Y = 105.0$), Project Hub ở Tầng 1 ($Y = 210.0$), Orchestrator ở Tầng 2 ($Y = 310.0$), và 5 Subagent dàn quạt ngang ở Tầng 3 ($Y = 350.0 - 440.0$, span $X = cx \pm 220.0$).
-   - Vị trí hoàn toàn ổn định 100%, không bị rung lắc hay biến dạng khi nạp lại trang.
-2. **Lực Hấp Dẫn (`force`)**:
-   - Bố cục động lực học hạt (Spring-Embedder Simulation) của ECharts.
-   - Các node đẩy nhau bằng lực `dynamicRepulsion` (160 - 260), cạnh liên kết có độ dài lò xo `dynamicEdgeLength` (40 - 110), và lực hút trọng tâm `dynamicGravity = 0.2` kéo toàn bộ mạng lưới về trung tâm màn hình.
-3. **Vòng Tròn (`circular`)**:
-   - Xếp toàn bộ các Node trên một đường tròn đồng tâm, nhãn tự động xoay theo góc tiếp tuyến (`rotateLabel: true`), tối ưu cho việc nhìn nhận mật độ kết nối chéo giữa các tác tử.
+
+Sơ đồ Topology hỗ trợ 3 chế độ bố cục chuyên sâu, đáp ứng linh hoạt từ nhu cầu kiểm soát thứ bậc nghiêm ngặt đến khám phá trực quan mật độ liên kết:
+
+1. **📌 Ghim Cố Định (`pinned` / `none`)**:
+   - **Cấu trúc phân cấp 4 tầng kim tự tháp (4-Tier Hierarchy)**: Tọa độ $(X, Y)$ của từng Node được tính toán giải thuật phân tầng hình cây chuẩn xác bởi Golang Backend (`storage/repository.go:1725-1730`):
+     * **Level 0 (Root Controller & Account)**: Đỉnh trung tâm $(X = 1500.0, Y = 105.0)$, kích thước $64\text{px}$, vầng hào quang hoàng gia `#fbbf24`.
+     * **Level 1 (Project Hubs)**: Tọa độ $(X = cx, Y = 210.0)$, kích thước $56\text{px}$, phân tách đối xứng theo khoảng cách $780.0\text{px}$ (`stepX = 780.0`).
+     * **Level 2 (Primary Orchestrators)**: Tọa độ $(X = cx, Y = 310.0)$, kích thước $48\text{px}$, màu cyan `#06b6d4`.
+     * **Level 3 (Subagents)**: Dàn quạt ngang đối xứng ($Y = 350.0 - 440.0$, span $X = cx \pm 220.0$), kích thước $36 - 46\text{px}$.
+   - **Tính ổn định tuyệt đối**: Mọi nốt đều được gán `fixed: true` kèm tọa độ $(x, y)$ xác định. Vị trí hoàn toàn ổn định 100%, không bị rung lắc, trôi dạt hay biến dạng khi nạp lại trang.
+
+2. **🧲 Lực Hấp Dẫn Đàn Hồi (`force`)**:
+   - **Mô phỏng động lực học hạt (Spring-Embedder Simulation)** của Apache ECharts, được điều phối bởi **Quy Luật Tương Tác Vật Lý Động Theo Quy Mô Node (4-Tier Force Physics Scaling Law)** tại `web/static/index.html:6033-6053`:
+     | Quy Mô Mạng Lưới ($N$) | Lực Đẩy Repulsion | Độ Dài Cạnh Edge Length | Trọng Lực Gravity | Ý Nghĩa Vận Hành |
+     | :--- | :---: | :---: | :---: | :--- |
+     | **Cực Lớn ($N > 40$)** | **`2200`** | `[180, 350]` | **`0.03`** | Lực đẩy cực đại giải phóng toàn bộ không gian canvas 1920px, chống nghẽn |
+     | **Lớn ($N > 25$)** | **`1800`** | `[150, 300]` | **`0.04`** | Dãn cách thoáng đãng, các nhánh subagent tự do bung rộng |
+     | **Vừa ($N > 12$)** | **`1200`** | `[120, 250]` | **`0.06`** | Cân bằng hoàn hảo giữa mật độ liên kết và khoảng cách đọc nhãn |
+     | **Nhỏ ($N \le 12$)** | **`800`** | `[100, 200]` | **`0.06`** | Mức tối thiểu an toàn, tuyệt đối không dùng $< 800$ gây dính chùm nốt |
+   - **Thông số động lực học cân bằng tĩnh**:
+     * `initLayout: 'circular'`: Khởi tạo phân bổ các nốt theo vòng tròn đồng tâm trước khi bật mô phỏng vật lý (thay vì `'none'` ngẫu nhiên gây sụp đổ dồn cục).
+     * `friction: 0.65`: Hệ số ma sát cao giúp hệ thống nhanh chóng hấp thụ động năng và đạt trạng thái cân bằng tĩnh ổn định, chấm dứt hoàn toàn hiện tượng rung lắc kéo dài.
+     * `gravity: 0.03 - 0.06`: Trọng lực thấp giúp đồ thị tự do lan tỏa đều khắp không gian, không bị co cụm kéo sụp về tâm.
+   - **Quy Tắc Cách Ly Tọa Độ Tuyệt Đối (Absolute Coordinate Decoupling Protocol)**:
+     * Trong chế độ `force` (và `circular`), **NGHIÊM CẤM** truyền tọa độ $x, y$ hay gán `fixed: true` cho bất kỳ nốt nào (kể cả Root Controller hay Project Hubs):
+       ```javascript
+       x: (topologyLayout === 'pinned' || currentTopologyProject === 'workspace_overview') ? n.x : undefined,
+       y: (topologyLayout === 'pinned' || currentTopologyProject === 'workspace_overview') ? n.y : undefined,
+       fixed: (topologyLayout === 'pinned' || currentTopologyProject === 'workspace_overview'),
+       ```
+     * Bất kỳ nốt nào bị neo tọa độ sẽ hoạt động như một mỏ neo lệch tâm kéo toàn bộ mạng lưới tác tử văng vào góc màn hình ("lào vào góc").
+   - **Triệt Tiêu Nhiễu Thị Giác & Tinh Gọn Kích Thước (Zero Visual Redundancy Protocol)**:
+     * **Kích thước Node tinh chỉnh**: Ở chế độ Force, kích thước nốt được thu gọn theo tỷ lệ chuẩn: Root $44\text{px}$ (thay vì $52\text{px}$), Project $34\text{px}$ (thay vì $42\text{px}$), Orchestrator $28\text{px}$ (thay vì $36\text{px}$), Subagent $22\text{px}$ (thay vì $30\text{px}$).
+     * **Đường nối thanh mảnh**: `lineWidth: 0.8 - 1.8px`, `curveness: 0.2`, `opacity: 0.4 - 0.8`.
+     * **Loại bỏ hoàn toàn huy hiệu chữ tĩnh `⚡ RUNNING` pill đè dưới chân node**: Trạng thái hoạt động được chỉ báo tinh tế qua vầng sóng xung nhịp radar lan tỏa (`Active Ripple Rings`), hào quang pulsing nhịp thở và luồng hạt photon 60 FPS, chấm dứt hoàn toàn hiện tượng trùng lặp và che khuất nhãn.
+
+3. **⭕ Vòng Tròn Đối Xứng (`circular`)**:
+   - Xếp toàn bộ các Node trên một đường tròn đồng tâm đối xứng qua trọng tâm màn hình.
+   - Nhãn tự động xoay theo góc tiếp tuyến (`rotateLabel: true`), tối ưu cho việc nhìn nhận mật độ kết nối chéo giữa các tác tử.
+   - Tuân thủ nghiêm ngặt Quy tắc cách ly tọa độ (`x: undefined, y: undefined, fixed: false`) và căn giữa khung nhìn `['50%', '50%']`.
 
 ---
 
@@ -601,6 +686,19 @@ Khi người dùng truy cập chế độ xem Topology Graph, hệ thống kích
    $$\text{optZoom} = \text{clamp}(\min(\text{scaleX}, \text{scaleY}), 0.38, 1.40)$$
 5. **Anti-Drift Storage Contract**:
    Hệ thống chỉ lưu `zoom` vào `localStorage` khi người dùng bấm phóng to/thu nhỏ (`zoomTopologyGraph`), tuyệt đối **KHÔNG lưu tọa độ `center`**. Khi khởi động lại hoặc bấm nút Reset View (`resetTopologyView`), đồ thị luôn căn giữa hoàn hảo tại $[midX, midY]$.
+6. **Phân Rã Độc Lập Zoom & Trọng Tâm Theo Bố Cục (Layout-Specific Camera Decoupling)**:
+   Để triệt tiêu hoàn toàn nguy cơ lệch khung nhìn hoặc trôi đồ thị ra rìa canvas khi người dùng chuyển đổi qua lại giữa các chế độ bố cục, camera ECharts được phân rã độc lập tuyệt đối tại `web/static/index.html:6118-6124`:
+   ```javascript
+   const effectiveZoom = (isForceLayout || isCircularLayout) ? 0.85 : (savedGraphZoom || fitConfig.zoom);
+   const effectiveCenter = isPinnedOrOverview ? fitConfig.center : ['50%', '50%'];
+   ```
+   - **Chế độ Ghim Cố Định (`pinned` / `workspace_overview`)**:
+     * Trọng tâm camera: Sử dụng `fitConfig.center` (tính từ tọa độ trung tâm hình học $[midX, midY]$ của toàn bộ các cụm dự án 4 tầng).
+     * Hệ số phóng to: Áp dụng `savedGraphZoom` do người dùng tinh chỉnh hoặc `fitConfig.zoom` tối ưu.
+   - **Chế độ Tự Do (`force`) & Vòng Tròn (`circular`)**:
+     * Trọng tâm camera: Bắt buộc gán tĩnh `['50%', '50%']` để camera luôn nhắm chuẩn xác vào tâm thực thể của khung chứa HTML container.
+     * Hệ số phóng to: Bắt buộc gán `0.85` (hệ số tiêu chuẩn cân đối cho không gian lực đàn hồi bung rộng).
+   - **Lợi ích kiến trúc**: Ngăn chặn triệt để sự "nhiễm bẩn tọa độ" (coordinate contamination) từ chế độ Cố định sang chế độ Tự do. Lực đàn hồi Force tự tìm trạng thái cân bằng đối xứng quanh tâm viewport; nếu áp đặt trọng tâm $[midX, midY]$ của cấu trúc Pinned lệch trục, đồ thị sẽ bị kéo văng ra sát mép màn hình.
 
 ---
 
@@ -706,6 +804,8 @@ Toàn bộ các API được phục vụ qua HTTP JSON trên cổng `9090`:
 - **Tham số truy vấn**:
   - `?range=today|24h|7d|30d|all`: Lọc số liệu token và tác vụ theo khung thời gian (mặc định: `all`).
   - `?project=all|proj-mcredit|proj-tieuchuanhardeninglinux|proj-tokenmonitor|proj-projectscriptos`: Lọc theo cụm dự án cụ thể hoặc hiển thị song song tất cả các dự án (mặc định: `all`).
+    * **Khi `project=all` (hoặc `""`)**: Áp dụng **Quy chuẩn lọc dự án hoạt động trong vòng 1 giờ** (`oneHourAgo = now - 75m`, `LatestActivity`, `IsRunning`). Hệ thống chỉ tải các dự án đang chạy (`p.IsRunning == true`) hoặc có hoạt động trong 75 phút gần nhất. Nếu không có dự án nào thỏa mãn, kích hoạt fallback an toàn giữ lại duy nhất 1 dự án gần nhất (`mostRecentProject`) để tránh màn hình trắng.
+    * **Khi chỉ định dự án cụ thể (ví dụ: `proj-tokenmonitor`)**: Hệ thống bỏ qua quy tắc 1 giờ, luôn nạp đầy đủ cấu trúc đồ thị và toàn bộ lịch sử tác vụ của dự án được chọn.
 - **Phản hồi mẫu**:
   ```json
   {

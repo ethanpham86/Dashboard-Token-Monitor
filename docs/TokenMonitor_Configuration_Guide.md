@@ -296,7 +296,7 @@ TokenMonitor/
   - `GET /api/agents/concurrency`: Trả về chuỗi dữ liệu tải đồng thời theo thời gian.
   - `GET /api/agents/gantt`: Trả về danh sách tác vụ Gantt theo vai trò hoặc phiên.
   - `GET /api/agents/gantt/packets`: Trả về các gói tin tiến trình tác vụ Subagent định dạng timeline packets.
-  - `GET /api/agents/graph`: Trả về dữ liệu đồ thị Topology mạng lưới đa tác nhân Antigravity.
+  - `GET /api/agents/graph`: Trả về dữ liệu đồ thị Topology mạng lưới đa tác nhân Antigravity. Hỗ trợ query `?range=today|24h|7d|30d|all` và `?project=all|<project_id>`. Khi xem chế độ `all`, hệ thống áp dụng **Quy chuẩn lọc dự án hoạt động trong vòng 1 giờ** (`oneHourAgo = now - 75m`, `LatestActivity`, `IsRunning`), tự động loại bỏ các dự án không hoạt động cho đỡ rối và kích hoạt fallback 1 dự án gần nhất nếu toàn bộ hệ thống nhàn rỗi.
   - `GET /api/openai/dashboard`: Trả về dữ liệu tổng hợp telemetry của OpenAI Codex.
   - `GET /api/openai/graph`: Trả về dữ liệu đồ thị Topology phân cấp 4 tầng của OpenAI Codex.
   - `POST /api/openai/refresh`: Kích hoạt quét lại log phiên Codex cục bộ.
@@ -315,7 +315,12 @@ TokenMonitor/
   - **Hộp thoại FinOps Modal tương tác**: Tự động chuyển đổi sang Preset giá cước tương ứng (Gemini Pro/Flash, GPT-5.6 Sol / GPT-4o, Claude 3.7 / 3.5 Sonnet).
   - **Bộ điều khiển thời gian đơn nhất**: 1 cụm 5 mốc thời gian duy nhất tại thanh sub-nav trên cùng (`today`, `24h`, `7d`, `30d`, `all`).
   - **Nhận diện trạng thái Concurrency chân thực**: Tự động hiển thị `0 / 16 (Idle • Đã tắt ứng dụng)` và badge `STANDBY` khi app đóng.
-  - **Sơ đồ Topology 60 FPS chuẩn hóa**: Cung cấp đồ thị phân cấp 4 tầng với hoạt họa dòng chảy GPU cho cả 3 nền tảng AI.
+  - **Sơ đồ Topology 60 FPS chuẩn hóa & 3 Chế độ bố cục (Layout Modes)**:
+    * **📌 Cố Định (`pinned`)**: Phân cấp 4 tầng kim tự tháp với tọa độ Golang tính sẵn ($canvasCX=1500, stepX=780$), gán `fixed: true` ổn định 100%.
+    * **🧲 Tự Do (`force`)**: Áp dụng **Quy luật tương tác vật lý động 4 tầng (Force Physics Scaling Law)** ($N > 40 \to 2200$, $N > 25 \to 1800$, $N > 12 \to 1200$, $N \le 12 \to 800$, `edgeLength: [100, 200] - [180, 350]`, `gravity: 0.03 - 0.06`, `initLayout: 'circular'`, `friction: 0.65`). Tuân thủ nghiêm ngặt **Quy tắc cách ly tọa độ tuyệt đối** (`x: undefined, y: undefined, fixed: false`) ngăn chặn hiện tượng văng vào góc màn hình.
+    * **⭕ Vòng Tròn (`circular`)**: Phân bổ đối xứng vòng tròn đồng tâm, `rotateLabel: true`, cách ly tọa độ và căn giữa hoàn hảo.
+  - **Responsive Auto-Fit & Layout-Specific Camera Decoupling**: Động cơ `calculateTopologyAutoFit` tự động xác định bounding box và căn giữa $[midX, midY]$. Phân rã độc lập camera ECharts: chế độ Force/Circular bắt buộc gán `center: ['50%', '50%']` và `zoom: 0.85`, trong khi chế độ Pinned sử dụng `fitConfig.center` và `fitConfig.zoom`.
+  - **Triệt Tiêu Nhiễu Thị Giác (Zero Visual Redundancy)**: Tinh gọn kích thước nốt ở chế độ Tự Do (Root 44px, Project 34px, Orch 28px, Subagent 22px), đường nối thanh mảnh (`width: 0.8 - 1.8px`), và loại bỏ hoàn toàn huy hiệu chữ tĩnh `⚡ RUNNING` pill đè dưới chân node, chỉ báo trạng thái hoạt động độc quyền qua vòng sóng nhịp radar lan tỏa và luồng hạt photon 60 FPS.
   - **Căn chỉnh nhãn đường cong chuẩn xác (`edgeLabel`) & 2 chế độ nhãn**: Sử dụng thuộc tính chuẩn `edgeLabel` với `position: 'middle'`, neo nhãn số liệu bám sát chính xác vị trí trung điểm đường cong Bezier. Tọa độ trung điểm `(lx, ly)` trên canvas overlay `#topo-flow-overlay` được đồng bộ qua ma trận biến đổi tọa độ toàn cục `transformCoordToGlobal`, đảm bảo không bao giờ bị lệch vị trí khi Zoom / Pan / Roam. Hỗ trợ chế độ tinh gọn `🏷️ Gọn Gàng` (hiện nhãn khi hover) và chế độ `📑 Hiện Tất Cả` (hiện nhãn tĩnh trên mọi đường truyền).
   - **Tự động chuyển đổi theo AI Provider (`syncAgentFleetControlsForProvider`)**: Khi chuyển sang tab OpenAI Codex hoặc Anthropic Claude, tự động ẩn các nút Dual View, Concurrency, Gantt và chuyển ngay sang chế độ Topology Graph tương ứng (`/api/openai/graph`, `/api/claude/graph`). Khi quay lại Google Antigravity, toàn bộ các nút điều khiển được tự động khôi phục.
   - **Dynamic Type-Hints**: Tự động cập nhật tooltip tương tác trên Header (`updateCodexHeader`, `updateClaudeHeader`) phản ánh đúng thông tin kỹ thuật của từng provider.

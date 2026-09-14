@@ -11,6 +11,7 @@ The system consists of:
 - **Anthropic Claude Local Monitor**: `collector/claude_monitor.go` incrementally parses `~/.claude/projects/**/*.jsonl`, extracts token breakdown, model calls, tool executions, and generates 4-layer topology hierarchy without accessing credentials.
 - **Detector Subsystem**: `storage/detector.go` opens `%APPDATA%\Antigravity IDE\User\globalStorage\state.vscdb` (or `ANTIGRAVITY_STATE_DB` / fallback) strictly `mode=ro` using isolated driver `sqlite_detector`. Dual-mode JSON and Protobuf stream extraction. Zero credentials stored.
 - **Master Offline Documentation Portal**: `docs/index.html` embeds 100% offline documentation via inlined `DOCS_DATA` object, compliant with 6 documentation standards.
+- **Git Repository & Security Policy**: Remote URL `https://github.com/ethanpham86/Dashboard-Token-Monitor.git`. Enforces strict exclusion of all skill definition markdown files (`**/*skill*.md`, `skills/`) in `.gitignore` to safeguard workstation instructions.
 
 ## Feature Inventory
 | # | Feature | Description | Milestone | Source |
@@ -58,6 +59,12 @@ The system consists of:
 | 41 | F41-Forensic-Integrity-Audit | Forensic audit verifying 100% Zero Mock Data contract across backend and frontend | M13 | User Requirement R1 & Audit |
 | 42 | F42-Topology-Active-Project-Auto-Focus | Tự động phát hiện dự án đang RUNNING/ACTIVE, auto-select dropdown và refetch/zoom vào cụm dự án đang chạy | M14 | User Requirement R1 |
 | 43 | F43-Topology-Responsive-Auto-Fit | Thuật toán calculateTopologyAutoFit([midX, midY]), bounding box, padding 160x150, co giãn theo viewport, Anti-Drift contract | M14 | User Requirement R3 |
+| 44 | F44-Topology-3-Layout-Modes-Physics-Scaling | Standardize 3 layout modes (📌 Pinned 4-tier, 🧲 Force 4-tier physics scaling law [800-2200, gravity 0.03-0.06, initLayout circular, friction 0.65], ⭕ Circular symmetry) | M15 | User Requirement R1 & R2 |
+| 45 | F45-Topology-Coordinate-Camera-Decoupling | Absolute coordinate decoupling (x/y: undefined, fixed: false in Force/Circular), Layout-Specific Camera Decoupling (effectiveCenter: ['50%','50%'], effectiveZoom: 0.85 for Force/Circular vs fitConfig for Pinned) | M15 | User Requirement R1 & R2 |
+| 46 | F46-Topology-1Hour-Project-Filter | 1-hour active project filtering protocol (`LatestActivity`, `IsRunning`, `oneHourAgo = now - 75m`, fallback to 1 most recent project, dropdown bypass) | M15 | User Requirement R1 & R2 |
+| 47 | F47-Topology-Zero-Visual-Redundancy | Elimination of static RUNNING text pills, refined node sizes (Root 44, Project 34, Orch 28, Subagent 22), slender edges in Force mode | M15 | User Requirement R1 & R2 |
+| 48 | F48-Interactive-Topology-Engine-Skill-Norm | Standardize `interactive_topology_engine` skill with 5 golden rules (both global and workspace) | M15 | User Requirement R1 |
+| 49 | F49-Doc-Sync-Master-Portal-Git | 100% Code-to-Doc synchronization across all technical documents, recompile Master Offline Portal `docs/index.html` (zero CORS), full test suite PASS, Git synchronization excluding skills | M15 | User Requirement R2, R3, R4 |
 
 ## Milestones
 | # | Name | Scope | Dependencies | Status |
@@ -77,6 +84,7 @@ The system consists of:
 | M12 | Frontend Tab 1 "🌐 Tổng Hợp Đa LLM" & Visualizations | F35, F36, F37 (`web/static/index.html`, 5 KPI cards, leaderboard table, stacked bar & donut charts) | M11 | DONE |
 | M13 | Comprehensive Testing, Binary Build & Doc Sync | F38, F39, F40, F41 (Unit tests, handler tests, `token_monitor.exe`, `docs/index.html`, forensic audit) | M11, M12 | DONE |
 | M14 | Topology Auto-Focus, 60 FPS Bézier Midpoint & Responsive Auto-Fit Audit | F42, F43 (Active project auto-focus, Bézier midpoint P(t=0.5) stickiness, Responsive Auto-Fit [midX, midY], test suite 100% PASS, daemon verification) | M13 | DONE |
+| M15 | Production Protocol Standardization & System Parity | F44, F45, F46, F47, F48, F49 (Layout modes, coordinate & camera decoupling, 1h filter, zero visual redundancy, skill norm, doc sync, portal recompile, Git sync) | M14 | DONE |
 
 ## Interface Contracts
 ### Ground Truth Rule
@@ -131,6 +139,25 @@ The system consists of:
    - **Auto-Focus (`updateTopologyProjectSelect` & `loadAgentFleetData`)**: Khi chưa có lựa chọn thủ công (`!userHasManuallyChosenTopologyProject`), hệ thống tự động quét danh sách dự án, nhận diện dự án có `status === 'ACTIVE' || status === 'RUNNING'` (ví dụ: `TokenMonitor (GoLangDev)`), tự động chọn option trên dropdown và refetch `/api/agents/graph?project=...` để focus ngay vào cụm dự án đang thực thi. Cờ `userHasManuallyChosenTopologyProject` được bật thành `true` khi người dùng tự tay chọn dropdown và chỉ reset khi chuyển tab Provider.
    - **Responsive Auto-Fit (`calculateTopologyAutoFit`)**: Hàm tính toán bounding box $[minX, maxX, minY, maxY]$ của tập node, căn giữa chính xác tại $[midX, midY] = [\text{round}((minX+maxX)/2), \text{round}((minY+maxY)/2)]$, bổ sung đệm an toàn $padX = 160\text{px}, padY = 150\text{px}$, co giãn tỷ lệ tối ưu theo khung nhìn ($92\%$ width, $84\%$ height), clamp trong khoảng $[0.38, 1.40]$.
    - **Anti-Drift Storage Contract**: Tuyệt đối không lưu tọa độ `center` vào `localStorage` (chỉ lưu `agent_fleet_graph_zoom`) để loại bỏ hoàn toàn nguy cơ lệch tọa độ ra ngoài màn hình khi tải lại trang sau khi pan/roam.
+
+9. **Quy Chuẩn Bố Cục Đồ Thị, Cách Ly Tọa Độ & Lọc Dự Án 1 Giờ (Topology Layouts, Coordinate Decoupling & 1-Hour Active Filter Invariants)**:
+   - **3 Chế Độ Bố Cục Chuẩn Hóa**:
+     * 📌 **Cố Định (`pinned`)**: Kiến trúc 4 tầng phân cấp kim tự tháp (Level 0 Root 64px, Level 1 Project Hubs 56px, Level 2 Orchestrator 48px, Level 3 Subagents 36-46px) với tọa độ tính toán sẵn từ Golang backend ($canvasCX=1500, stepX=780$). Toàn bộ node mang `fixed: true`.
+     * 🧲 **Tự Do (`force`)**: Mô phỏng đàn hồi hạt theo **Quy luật tương tác vật lý động 4 tầng (4-Tier Force Physics Scaling Law)** ($N > 40 \implies \text{repulsion} = 2200, \text{edgeLength} = [180, 350], \text{gravity} = 0.03$; $N > 25 \implies 1800, [150, 300], 0.04$; $N > 12 \implies 1200, [120, 250], 0.06$; $N \le 12 \implies 800, [100, 200], 0.06$). Khởi tạo đối xứng qua `initLayout: 'circular'` và hệ số ma sát `friction: 0.65` nhanh chóng đạt cân bằng tĩnh, triệt tiêu rung lắc kéo dài.
+     * ⭕ **Vòng Tròn (`circular`)**: Phân bổ đối xứng vòng tròn đồng tâm, `rotateLabel: true`.
+   - **Quy Tắc Cách Ly Tọa Độ Tuyệt Đối (Absolute Coordinate Decoupling Protocol)**:
+     * Trong các chế độ động (`force` và `circular`), bắt buộc truyền `x: undefined, y: undefined, fixed: false` cho toàn bộ các node (kể cả Root Controller và Project Hubs). Nghiêm cấm neo tọa độ tĩnh vì sẽ biến node thành mỏ neo lệch tâm kéo văng toàn bộ đồ thị vào góc màn hình ("lào vào góc").
+   - **Phân Rã Độc Lập Camera Theo Bố Cục (Layout-Specific Camera Decoupling)**:
+     * Chế độ Force / Circular: Bắt buộc camera thiết lập `effectiveCenter: ['50%', '50%']` và `effectiveZoom: 0.85`, tuyệt đối không dùng chung `fitConfig` của Pinned layout.
+     * Chế độ Pinned: Sử dụng `fitConfig.center` $[midX, midY]$ và `fitConfig.zoom` (hoặc `savedGraphZoom`).
+   - **Quy Chuẩn Lọc Dự Án Hoạt Động Trong Vòng 1 Giờ (1-Hour Active Project Filtering Protocol)**:
+     * `oneHourAgo = now.Add(-75 * time.Minute)` (cửa sổ 60 phút kèm 15 phút đệm an toàn).
+     * Điều kiện nạp: `p.IsRunning || (!p.LatestActivity.IsZero() && p.LatestActivity.After(oneHourAgo))`.
+     * Safe Fallback: Nếu không có dự án nào thỏa mãn trong 75m, giữ lại duy nhất 1 dự án gần nhất (`mostRecentProject`), triệt tiêu 100% nguy cơ màn hình trắng (Zero-Blank Graph Guard).
+     * Dropdown Override: Khi người dùng chọn 1 dự án cụ thể từ dropdown, bỏ qua quy tắc 1 giờ và nạp đầy đủ dự án đó.
+   - **Triệt Tiêu Nhiễu Thị Giác & Trùng Lặp Nhãn (Zero Visual Redundancy Protocol)**:
+     * Loại bỏ hoàn toàn huy hiệu chữ tĩnh `⚡ RUNNING` pill đè dưới chân node. Trạng thái hoạt động được chỉ báo qua vầng sóng xung nhịp radar lan tỏa (`Active Ripple Rings`) và 3 photon chuyển động 60 FPS.
+     * Tinh gọn kích thước nốt trong Force mode (Root 44px, Project 34px, Orch 28px, Subagent 22px) và đường nối thanh mảnh (`width: 0.8 - 1.8px`, `curveness: 0.2`, `opacity: 0.4 - 0.8`).
 
 ### Documentation Standards Compliance
 - Must strictly comply with all 6 standards in `C:\Users\EthanPham\.gemini\config\skills\archify\references\documentation-standards.md`:

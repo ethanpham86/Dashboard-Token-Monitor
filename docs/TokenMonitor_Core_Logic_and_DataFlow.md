@@ -96,7 +96,7 @@ Hệ thống TokenMonitor hoạt động hoàn toàn **nội bộ, thụ động
   * `/api/agents/concurrency`: Hỗ trợ `?range=today|24h|7d|30d|all` nhóm theo giờ hoặc ngày.
   * `/api/agents/gantt`: Hỗ trợ `?groupBy=roles|sessions` và `?range=today|24h|7d|30d|all`.
   * `/api/agents/gantt/packets`: Hỗ trợ `?range=today|24h|7d|30d|all` phân tích gói tin ngữ cảnh.
-  * `/api/agents/graph`: Hỗ trợ `?project=...&range=today|24h|7d|30d|all` phục vụ Topology Network Graph.
+  * `/api/agents/graph`: Hỗ trợ `?project=...&range=today|24h|7d|30d|all` phục vụ Topology Network Graph. Khi xem chế độ `all`, hệ thống áp dụng **Quy chuẩn lọc dự án hoạt động trong vòng 1 giờ** (`oneHourAgo = now - 75m`, `LatestActivity`, `IsRunning`), chỉ tải các dự án đang chạy hoặc có hoạt động trong 75 phút gần nhất, kèm cơ chế fallback an toàn 1 dự án gần nhất nếu toàn hệ thống nhàn rỗi.
 
 ####  Trạm 6: Giao Diện Web Dashboard (`web/static/index.html`)
 * Giao diện Glassmorphism trực quan, tự động gọi API AJAX mỗi 5 giây để làm mới:
@@ -105,9 +105,11 @@ Hệ thống TokenMonitor hoạt động hoàn toàn **nội bộ, thụ động
   * **Cột Est. USD ($) Trong Bảng Lịch Sử Hàng Ngày**: Giúp theo dõi chi phí chi tiêu AI theo từng ngày.
   * **Biểu đồ chuỗi thời gian & Biểu đồ Gantt**: Trực quan hóa chi tiết lưu lượng token và tiến độ của từng tác vụ Subagent trong Fleet.
   * **Sơ đồ Topo Đa Tác Nhân (Topology Network Graph)**:
-    - **Phân cấp 4 tầng kim tự tháp**: Đỉnh tối cao là **Nút Gốc Root Controller & Account (`root-account`)** đại diện cho tài khoản chủ `Pham Ethan (Antigravity AI)` / `Google AI Ultra (20X Ultra Tier)` (Level 0) điều phối 3 cụm Project Hubs (`MCREDIT`, `TieuChuanHardeningLinux`, `TokenMonitor` - Level 1) qua các luồng `ROOT_ORCHESTRATION` vàng kim `#fbbf24`, tiếp đến các Primary Orchestrators (Level 2) và 5 vai trò Subagent (Level 3).
-    - **Cụm nút lọc thời gian chuyên dụng trên Toolbar (`#grp-topo-range-controls`)**: 5 mốc (`⚡ Hôm Nay`, `24 Giờ`, `7 Ngày`, `🗓️ 30 Ngày`, `♾️ Toàn Bộ`) đồng bộ 2 chiều với HUD và kích hoạt tải lại dữ liệu tức thì.
+    - **Phân cấp 4 tầng kim tự tháp**: Đỉnh tối cao là **Nút Gốc Root Controller & Account (`root-account`)** đại diện cho tài khoản chủ `Pham Ethan (Antigravity AI)` / `Google AI Ultra (20X Ultra Tier)` (Level 0) điều phối các cụm Project Hubs (`MCREDIT`, `TieuChuanHardeningLinux`, `TokenMonitor`, `ProjectScriptOS` - Level 1) qua các luồng `ROOT_ORCHESTRATION` vàng kim `#fbbf24`, tiếp đến các Primary Orchestrators (Level 2) và 5 vai trò Subagent (Level 3).
+    - **3 Chế độ bố cục (Layout Modes)**: 📌 Cố Định (4 tầng phân cấp ổn định), 🧲 Tự Do (Force với Quy luật tương tác vật lý động 4 tầng $800 - 2200$, `initLayout: 'circular'`, `friction: 0.65`, và Quy tắc cách ly tọa độ tuyệt đối `x: undefined, y: undefined, fixed: false`), ⭕ Vòng Tròn (Circular phân bổ bán kính đối xứng).
+    - **Responsive Auto-Fit & Layout-Specific Camera Decoupling**: Tự động căn giữa $[midX, midY]$ theo bounding box; phân rã độc lập camera ECharts (`center: ['50%', '50%']` và `zoom: 0.85` cho Force/Circular vs `fitConfig` cho Pinned), loại bỏ nguy cơ trôi văng góc.
     - **Quy chuẩn chân thực thời gian thực (Zero Fake Motion)**: Khi dự án đã dừng (`COMPLETED` / `IDLE`), chuyển động của mũi tên và hạt photon dừng lại hoàn toàn (0 mũi tên động, 0 hạt photon, 0 vòng sóng xung nhịp). Thay vào đó, vẽ **1 mũi tên chevron tĩnh cố định tại trung điểm ($t = 0.5$)** với độ mờ $0.45$ để chỉ hướng cấu trúc dây mà không gây chuyển động giả lập. Khi có tác vụ đang chạy (`RUNNING`), tự động kích hoạt 3 mũi tên lướt 60 FPS và 3 hạt photon phát quang.
+    - **Triệt tiêu nhiễu thị giác (Zero Visual Redundancy)**: Tinh gọn kích thước nốt (Root 44, Project 34, Orch 28, Subagent 22), đường nối thanh mảnh, và loại bỏ hoàn toàn huy hiệu chữ tĩnh `⚡ RUNNING` pill đè dưới chân node, chỉ báo trạng thái bằng sóng nhịp radar và photon 60 FPS.
     - **Huy hiệu Pill Badge gắn trên đỉnh đường cong Bezier**: Khi hover, tính toán tọa độ trung điểm $(lx, ly)$ tại $t=0.5$ và vẽ huy hiệu nổi bật với tiền tố ngữ cảnh (`🌐 Điều phối: ...`, `⚡ Giao việc: ...`, `🔄 Báo cáo: ...`, `📦 Ngữ cảnh: ...`).
     - **Chế độ Smart Mode**: Mặc định ẩn nhãn tĩnh trên khoảng trống (`label: { show: false }`), giữ đồ thị luôn thoáng đãng; hỗ trợ nút gạt sang `🏷️ Tất Cả Nhãn` khi cần.
 
@@ -271,13 +273,28 @@ Khi bạn nhìn thấy thẻ **`ACTIVE CONCURRENCY 14 / 16 (Peak Concurrency •
     └───────────┘       └───────────┘ └───────────┘       └───────────┘
 ```
 
-* **Cấu Trúc Đồ Thị 3 Tầng**:
-  1. **Nút Gốc (Root Node)**: Đại diện cho Agent điều phối chính (Orchestrator).
-  2. **Nút Dự Án (Project Workspaces)**: Đại diện cho các thư mục mã nguồn hoặc dự án mà Agent đang tương tác.
-  3. **Nút Vai Trò Tác Nhân (Subagents)**: Phân loại theo 5 vai trò chuyên môn (`Research`, `Explorer`, `Worker`, `Tester`, `Auditor`).
-* **Trọng Số Liên Kết & Quy Hoạch Lực Động (Force-Directed Physics)**:
+* **Cấu Trúc Đồ Thị Phân Cấp 4 Tầng Kim Tự Tháp**:
+  1. **Level 0 (Root Controller & Account)**: Đỉnh tối cao đại diện cho tài khoản chủ `Pham Ethan (Antigravity AI)` / `Google AI Ultra (20X Ultra Tier)`, kích thước 64px, điều phối các dự án qua luồng `ROOT_ORCHESTRATION` vàng kim `#fbbf24`.
+  2. **Level 1 (Project Hub Nodes)**: Đại diện cho các cụm workspace độc lập (`TokenMonitor`, `MCREDIT`, `TieuChuanHardeningLinux`, `ProjectScriptOS`), kích thước 56px, phân tách ngang chuẩn xác $780.0\text{px}$.
+  3. **Level 2 (Primary Orchestrator Nodes)**: Bộ não điều phối trung tâm của từng dự án, kích thước 48px, cyan `#06b6d4`.
+  4. **Level 3 (Subagents)**: 5 vai trò chuyên môn (`Research`, `Explorer`, `Worker`, `Tester`, `Auditor`), kích thước 36 - 46px, dàn quạt ngang đối xứng.
+* **Trọng Số Liên Kết & Quy Hoạch Lực Động (Force Physics Scaling Law)**:
   - Cạnh nối giữa Project và Subagent mang thông số: tổng số tác vụ thực thi (`tasks`) và số lượng tokens ủy quyền (`tokens_offloaded`).
-  - Động cơ ECharts Graph được cấu hình lực đẩy phân tán cao (`repulsion: 1200 - 1600`) và độ dài cạnh linh hoạt (`edgeLength: 130 - 320`) kết hợp giảm trọng lực (`gravity: 0.03 - 0.05`), ngăn chặn hiện tượng co cụm thắt nút khi số lượng nút vượt quá 30.
+  - Động cơ ECharts Graph được cấu hình **Quy luật tương tác vật lý động 4 tầng (4-Tier Force Physics Scaling Law)** tại `web/static/index.html:6033-6053`:
+    * $N > 40 \implies \text{repulsion} = 2200, \text{edgeLength} = [180, 350], \text{gravity} = 0.03$.
+    * $N > 25 \implies \text{repulsion} = 1800, \text{edgeLength} = [150, 300], \text{gravity} = 0.04$.
+    * $N > 12 \implies \text{repulsion} = 1200, \text{edgeLength} = [120, 250], \text{gravity} = 0.06$.
+    * $N \le 12 \implies \text{repulsion} = 800, \text{edgeLength} = [100, 200], \text{gravity} = 0.06$.
+    * `initLayout: 'circular'` (khởi tạo đối xứng bán kính) và `friction: 0.65` (đạt trạng thái cân bằng tĩnh nhanh chóng, triệt tiêu rung lắc kéo dài).
+  - **Quy Tắc Cách Ly Tọa Độ Tuyệt Đối (Absolute Coordinate Decoupling Protocol)**: Bắt buộc thiết lập `x: undefined, y: undefined, fixed: false` cho toàn bộ các node ở chế độ Force và Circular, ngăn chặn triệt để hiện tượng nốt bị neo tọa độ kéo văng đồ thị vào góc màn hình.
+  - **Phân Rã Độc Lập Camera (Layout-Specific Camera Decoupling)**: Thiết lập `center: ['50%', '50%']` và `zoom: 0.85` cho Force/Circular, cách ly hoàn toàn khỏi `fitConfig` của chế độ Cố Định (Pinned).
+  - **Triệt Tiêu Nhiễu Thị Giác (Zero Visual Redundancy)**: Tinh gọn kích thước nốt (Root 44px, Project 34px, Orch 28px, Subagent 22px), đường nối thanh mảnh (`width: 0.8 - 1.8px`), và loại bỏ hoàn toàn huy hiệu chữ tĩnh `⚡ RUNNING` pill đè dưới chân node, chuyển sang chỉ báo trực quan bằng sóng nhịp radar và photon 60 FPS.
+* **Quy Chuẩn Lọc Dự Án Hoạt Động Trong Vòng 1 Giờ (`storage/repository.go:1889-1925`)**:
+  - Nhằm tránh việc nạp quá nhiều dự án đã dừng từ lâu gây rối mắt, hàm `GetAgentTopologyGraph` áp dụng quy tắc lọc 1 giờ:
+    * `oneHourAgo = now.Add(-75 * time.Minute)`: Cửa sổ 60 phút kèm 15 phút đệm an toàn.
+    * Tiêu chí nhận diện: `isActiveOrRecent := p.IsRunning || (!p.LatestActivity.IsZero() && p.LatestActivity.After(oneHourAgo))`.
+    * Fallback an toàn: Nếu không có dự án nào thỏa mãn (hệ thống nhàn rỗi hoàn toàn), giữ lại duy nhất 1 dự án có hoạt động gần đây nhất (`mostRecentProject`) để màn hình không bao giờ bị trắng trơn.
+    * Quyền ghi đè thủ công: Khi người dùng chọn 1 dự án cụ thể từ dropdown, quy tắc 1 giờ được bỏ qua, nạp đầy đủ dự án đó cùng toàn bộ lịch sử.
 * **Đồng Bộ Hóa Thời Gian Toàn Cục (`?range=24h|7d|30d|all`)**:
   - Hàm `parseAgentTimeCondition(timeRange, "started_at")` tại `storage/repository.go` chuyển đổi tham số query thành mệnh đề thời gian SQLite:
     - `24h`: `started_at >= datetime('now', '-1 day')`
