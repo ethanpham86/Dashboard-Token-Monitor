@@ -65,6 +65,7 @@ The system consists of:
 | 47 | F47-Topology-Zero-Visual-Redundancy | Elimination of static RUNNING text pills, refined node sizes (Root 44, Project 34, Orch 28, Subagent 22), slender edges in Force mode | M15 | User Requirement R1 & R2 |
 | 48 | F48-Interactive-Topology-Engine-Skill-Norm | Standardize `interactive_topology_engine` skill with 5 golden rules (both global and workspace) | M15 | User Requirement R1 |
 | 49 | F49-Doc-Sync-Master-Portal-Git | 100% Code-to-Doc synchronization across all technical documents, recompile Master Offline Portal `docs/index.html` (zero CORS), full test suite PASS, Git synchronization excluding skills | M15 | User Requirement R2, R3, R4 |
+| 50 | F50-Codex-Monitor-Audit-Optimization | Bóc tách chính xác usage Codex: khử đếm trùng baseline delta, xử lý compaction/reset, phân rã stacked token, gán model theo turn_context, cô lập hash path workspace, loại bỏ công cụ giả lập và bảo vệ quyền riêng tư credential | M16 | User Request Audit |
 
 ## Milestones
 | # | Name | Scope | Dependencies | Status |
@@ -85,6 +86,7 @@ The system consists of:
 | M13 | Comprehensive Testing, Binary Build & Doc Sync | F38, F39, F40, F41 (Unit tests, handler tests, `token_monitor.exe`, `docs/index.html`, forensic audit) | M11, M12 | DONE |
 | M14 | Topology Auto-Focus, 60 FPS Bézier Midpoint & Responsive Auto-Fit Audit | F42, F43 (Active project auto-focus, Bézier midpoint P(t=0.5) stickiness, Responsive Auto-Fit [midX, midY], test suite 100% PASS, daemon verification) | M13 | DONE |
 | M15 | Production Protocol Standardization & System Parity | F44, F45, F46, F47, F48, F49 (Layout modes, coordinate & camera decoupling, 1h filter, zero visual redundancy, skill norm, doc sync, portal recompile, Git sync) | M14 | DONE |
+| M16 | OpenAI Codex Observability & Baseline Delta Optimization | F50 (`collector/codex_monitor.go`, `storage/repository.go`, `web/static/index.html`, tests, `docs/Codex_Monitor_Audit_20260915.md`) | M15 | DONE |
 
 ## Interface Contracts
 ### Ground Truth Rule

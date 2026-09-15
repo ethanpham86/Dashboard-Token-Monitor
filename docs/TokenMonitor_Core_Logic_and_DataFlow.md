@@ -1200,6 +1200,45 @@ Hệ thống cam kết 100% tuân thủ **Zero Mock Data Contract**:
 
 ---
 
+## PHẦN 6: CƠ CHẾ THU THẬP & CHỐNG ĐẾM TRÙNG OPENAI CODEX (CODEX COLLECTOR & BASELINE DELTA ENGINE)
+
+Nhằm đảm bảo số liệu tiêu thụ từ các phiên làm việc OpenAI Codex phản ánh trung thực 100% hiện trạng thực tế trên máy trạm, module `collector/codex_monitor.go` triển khai thuật toán bóc tách nhật ký chuyên sâu (đối chiếu chi tiết tại [`docs/Codex_Monitor_Audit_20260915.md`](./Codex_Monitor_Audit_20260915.md)):
+
+### 1. Cơ Chế Khử Đếm Trùng Hai Dạng Record (Unified Baseline Delta Engine)
+- **Bản chất vấn đề**: Trong file nhật ký session `.jsonl` của Codex, cùng một cập nhật token thường được ghi nhận ở cả hai định dạng:
+  1. `token_usage_record` (chứa `thread_token_usage` tích lũy và `response_id`).
+  2. `event_msg -> token_count` (chứa `total_token_usage` và đôi khi `last_token_usage`).
+  Nếu cộng độc lập cả hai dạng bản ghi, số lượng token sẽ bị phóng đại gấp đôi (Double Counting).
+- **Giải thuật xử lý**:
+  - Dùng chung một baseline tích lũy `thread_token_usage` / `total_token_usage` cho toàn bộ phiên.
+  - Sử dụng tập băm `seenResponseIDs map[string]struct{}` để khử trùng lặp `response_id`.
+  - Khi xuất hiện sự kiện token mới, hệ thống chỉ lấy **phần chênh lệch (Delta)** so với baseline cao nhất đã quan sát:
+    $$\Delta_{\text{total}} = \text{CurrentTotal} - \text{BaselineTotal}$$
+  - Cập nhật baseline mới: $\text{BaselineTotal} \leftarrow \text{CurrentTotal}$.
+
+### 2. Xử Lý Compaction, Reset & Cửa Sổ Trượt
+- Khi phiên làm việc Codex bị reset hoặc nén ngữ cảnh (compaction), bộ đếm tích lũy có thể sụt giảm đột ngột ($\text{CurrentTotal} < \text{BaselineTotal}$).
+- **Nguyên tắc an toàn**: Không coi toàn bộ snapshot thấp hơn là lượng token phát sinh mới (tránh phóng đại số liệu), đồng thời không sinh ra delta âm. Hệ thống đặt lại baseline, đánh dấu cờ `PARTIAL` trên dashboard để thông báo cho người dùng, và chỉ bắt đầu tính delta dương cho các lượt tiếp theo.
+
+### 3. Phân Rã Thành Phần Token & Mô Hình Biểu Đồ Chồng (Stacked Chart Parity)
+- Token input được chia thành: `Uncached Input` và `Cached Input` ($\text{Input} = \text{Uncached} + \text{Cached}$).
+- Token output được chia thành: `Text Output` và `Reasoning Tokens` ($\text{Output} = \text{NonReasoning} + \text{Reasoning}$).
+- Trên biểu đồ cột chồng (Stacked Bar Chart), công thức cộng dồn đảm bảo không cộng lặp:
+  $$\text{GrandTotal} = (\text{Input} - \text{Cached}) + \text{Cached} + (\text{Output} - \text{Reasoning}) + \text{Reasoning}$$
+
+### 4. Gán Model Chính Xác Theo Từng Lượt (`turn_context`)
+- Khi một session chuyển đổi model (ví dụ từ `gpt-5.6-sol` sang `gpt-4o`), hệ thống bóc tách `model_time_series` dựa trên model thực tế được ghi nhận trong sự kiện `turn_context` của từng lượt, thay vì gán toàn bộ bucket thời gian cho model đầu tiên tìm thấy.
+
+### 5. Đồ Thị Topo & Ranh Giới Định Danh Thư Mục
+- **Triệt tiêu công cụ ảo (Zero Fake Tools)**: Đồ thị Topology của Codex chỉ dựng các Workspace và Session thực tế quan sát được từ file log; tuyệt đối không tự sinh ra các nốt công cụ giả lập hay giả định mức concurrency cố định.
+- **Phân tách thư mục trùng tên (Path Hashing Isolation)**: Nếu hai workspace ở các ổ đĩa khác nhau có cùng tên thư mục (ví dụ `D:\code\app` và `E:\backup\app`), hệ thống sử dụng mã băm SHA-256 của đường dẫn tuyệt đối làm khóa định danh (`proj-codex-<hash>`), đảm bảo không bị gộp sai lệch dữ liệu.
+
+### 6. Kênh Tổng Hợp Không Giới Hạn Cho FinOps Leaderboard
+- Khi phục vụ bảng Session Table trên UI, hệ thống áp dụng `max_session_rows: 50` để bảo vệ hiệu năng DOM.
+- Khi tổng hợp số liệu liên nền tảng cho `GET /api/projects/leaderboard`, hệ thống tự động kích hoạt kênh `DashboardForAggregation` quét toàn bộ phiên mà không bị giới hạn 50 dòng, bảo đảm số liệu tổng hợp FinOps từ cả 3 nhà cung cấp (Google, Codex, Claude) luôn đạt độ chính xác 100%.
+
+---
+
 ## TỔNG KẾT
 
 Hệ thống **TokenMonitor** được thiết kế đạt tiêu chuẩn **Enterprise Reliability** với 8 trụ cột kiến trúc vững chắc:

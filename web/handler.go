@@ -126,7 +126,7 @@ func (s *Server) handleOpenAIRefresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.codexMonitor.Refresh(); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, "Không thể quét đầy đủ log Codex; kiểm tra cấu hình và quyền đọc.", http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -439,4 +439,3 @@ func (s *Server) handleProjectsLeaderboard(w http.ResponseWriter, r *http.Reques
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(leaderboard)
 }
-

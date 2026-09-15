@@ -71,13 +71,13 @@ Giao diện Web tại [http://127.0.0.1:9090](http://127.0.0.1:9090) được t�
 * **Cơ chế thu thập**: Delta Byte Offset con trỏ `f.Seek(lastOffset)` + lùi 32KB cho chat active < 30m; giải mã Protobuf tự động nhận diện `Pham Ethan` và hạng `Google AI Ultra (20X Ultra Tier)`.
 * **Mô hình chính**: Gemini 3.8 Flash, Gemini 3.7 Flash, Gemini 3.1 Pro, Gemini Ultra.
 
-### 2. 🟢 OpenAI Codex (GPT-5.6 Sol / GPT-6 Astra)
-* **Nguồn dữ liệu**: Local Session Logs tại `~/.codex/sessions/**/*.jsonl`.
-* **Cơ chế bóc tách**: Bóc tách chính xác từ sự kiện `event_msg -> token_count -> info` (`total_token_usage` và `last_token_usage`) khi `tot.TotalTokens > *prevTotalTokens`, triệt tiêu đếm trùng theo turn.
-* **Số liệu thực địa (Ground Truth)**: **40 sessions .jsonl**, **360.88M tokens (360,889,443 tokens)** (359.14M prompt, 1.74M output, 642.6k reasoning, 332.36M cached với **92.5% cache hit**), phân bổ trên **19 workspaces**, đồ thị Topology 4 tầng gồm **134 nodes** (1 root, 19 hubs, 19 orchs, 95 subworkers) và **133 links**.
-* **Quy tắc lọc thời gian**: Do phiên gần nhất vào ngày **2026-08-24**, các mốc `today`/`24h`/`7d` trả về **0 tokens**, `30d` trả về **1.54M tokens**, `all` trả về toàn bộ **360.88M tokens**.
-* **Mô hình chính**: `gpt-5.6-sol`, `gpt-6-astra`, `gpt-4o`.
-* **Đặc thù riêng**: Tích hợp đồng hồ hạn mức Rate Limits 5h & 7d (`primary` & `secondary` quota windows), bỏ qua êm ái khi chưa có thư mục sessions.
+### 2. 🟢 OpenAI Codex
+* **Nguồn**: `sessions_dir`, hoặc `$CODEX_HOME/sessions`, mặc định `~/.codex/sessions`. Chỉ phản ánh file cục bộ đã quét; không phải toàn bộ tài khoản hoặc danh sách người dùng.
+* **Token**: Thống nhất `token_usage_record.thread_token_usage` và `event_msg.token_count.total_token_usage`, tránh cộng hai lần cùng usage. Cached/reasoning là thành phần con của input/output. `model_calls` biểu thị số cập nhật usage có token, không đảm bảo số API request.
+* **Đồ thị**: Chỉ có workspace và session quan sát được; không tự sinh công cụ hoặc phân bổ token giả. Đồ thị và tổng hợp dự án không bị giới hạn bởi số dòng bảng.
+* **Trạng thái**: `ACTIVE` là log trong 2 phút gần đây và chưa ghi nhận kết thúc turn; không chứng minh ứng dụng đang chạy. `COMPLETED` cần sự kiện kết thúc, còn lại là `IDLE`.
+* **Quota và billing**: Hiển thị snapshot quota cùng thời gian ghi nhận, báo dữ liệu cũ; không mặc định Plus hoặc cửa sổ 5h/7d. Chi phí thực trả trong tab Codex là N/A vì log không chứa hóa đơn. FinOps liên nhà cung cấp vẫn là ước tính theo bảng giá cấu hình trong mã.
+* **Giới hạn**: `PARTIAL` khi lỗi đọc/parse, bộ đếm giảm hoặc chạm `max_files`. Xem [báo cáo rà soát Codex](docs/Codex_Monitor_Audit_20260915.md) để biết phạm vi và kiểm thử.
 
 ### 3. 🟣 Anthropic Claude (Claude 3.7 Sonnet / 3.5 Sonnet)
 * **Nguồn dữ liệu**: Local Project Logs tại `~/.claude/projects/**/*.jsonl`.
@@ -119,7 +119,7 @@ Mỗi tab của từng loại AI đều sở hữu đầy đủ toàn bộ các 
 3. **Bộ Điều Khiển Thời Gian Đơn Nhất (Single Unified Time-Range Controller)**:
    * Duy nhất 1 cụm 5 mốc thời gian chuẩn (`⚡ Hôm Nay`, `24 Giờ`, `7 Ngày`, `🗓️ 30 Ngày`, `♾️ Toàn Bộ`) ở góc phải thanh sub-navigation trên cùng, loại bỏ hoàn toàn hiện tượng trùng lặp nút gây rối mắt.
 4. **Nhận Diện Trạng Thái Tải Chân Thực (Zero Ghost Concurrency)**:
-   * Khi người dùng đã đóng app Codex hoặc Claude, hệ thống nhận diện tức thì và hiển thị chính xác **`ACTIVE CONCURRENCY: 0 / 16`** (`Idle • 0 Active Tasks (Đã tắt ứng dụng)`), badge header tự chuyển sang **`STANDBY`**, tuyệt đối không đếm ảo số lượng node lịch sử.
+   * Codex hiển thị số session có log trong 2 phút gần đây, loại trừ turn đã có sự kiện kết thúc. Không suy việc đóng ứng dụng hoặc giới hạn concurrency từ log.
 
 ---
 
@@ -157,7 +157,7 @@ Hệ thống cung cấp danh mục 20 endpoint REST API chuẩn (cùng 3 static/
 | `GET` | `/api/agents/gantt/packets` | Danh sách các gói tin tiến trình tác vụ Subagent định dạng timeline packets (`?range=today\|24h\|7d\|30d\|all`) |
 | `GET` | `/api/agents/graph` | Lấy sơ đồ mạng lưới topo tác nhân & workspace Antigravity (`?project=...&range=today\|24h\|7d\|30d\|all`) |
 | `GET` | `/api/openai/dashboard` | Dashboard OpenAI/Codex cục bộ (`?range=today\|24h\|7d\|30d\|all`), gồm token, workflow, models, rate limits và sessions an toàn |
-| `GET` | `/api/openai/graph` | Sơ đồ mạng lưới Topology phân cấp 4 tầng cho OpenAI Codex (`?range=today\|24h\|7d\|30d\|all`) |
+| `GET` | `/api/openai/graph` | Đồ thị workspace/session quan sát được cho OpenAI Codex (`?range=today\|24h\|7d\|30d\|all`) |
 | `POST` | `/api/openai/refresh` | Quét lại `~/.codex/sessions/**/*.jsonl` theo yêu cầu; không truy cập credential |
 | `GET` | `/api/claude/dashboard` | Dashboard Anthropic Claude Code CLI cục bộ (`?range=today\|24h\|7d\|30d\|all`), gồm token, tools, models, projects |
 | `GET` | `/api/claude/graph` | Sơ đồ mạng lưới Topology phân cấp 4 tầng cho Anthropic Claude (`?range=today\|24h\|7d\|30d\|all`) |

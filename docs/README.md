@@ -23,6 +23,7 @@ Toàn bộ tài liệu chính và sơ đồ tương tác được đặt trực 
 | [**Đặc Tả Đo Lường Token Agentic**](./TokenMonitor_Token_Estimation_Spec.md) | `Markdown` | Đặc tả thu thập kép (Local Tailer Heuristic vs Reverse Proxy Ground Truth), phân biệt `GENERIC` vs `PLANNER_RESPONSE`, công thức toán học 3 giai đoạn `EstimatePromptTokens`, bóc tách Output/Thinking tokens, và cơ chế Context Caching. |
 | [**Hướng Dẫn Cấu Hình Hệ Thống**](./TokenMonitor_Configuration_Guide.md) | `Markdown` | Cẩm nang cấu hình chi tiết `config.yaml`, cơ chế phát hiện tài khoản an toàn qua 3 đường dẫn `state.vscdb`, driver `sqlite_detector`, danh mục 5 bảng, phân loại 5 vai trò Subagent, danh mục phương thức Repository và danh sách 20 REST API (+ 3 static/doc routes, 1 healthz = 24 routes). |
 | [**Bộ Runbook Vận Hành Production**](./TokenMonitor_20260908/) | `Thư mục` | 7 tài liệu Runbook chuẩn Production: Điều kiện tiên quyết, Kiến trúc, Triển khai HA, Cài đặt, Tối ưu hiệu năng (TTL sweep 2m), Xử lý sự cố (Active Concurrency), Tuân thủ bảo mật và 4 tài liệu Reference. |
+| [**Báo Cáo Rà Soát & Tối Ưu Codex**](./Codex_Monitor_Audit_20260915.md) | `Markdown` | Báo cáo kiểm toán và chuẩn hóa bộ đếm OpenAI Codex: Khử đếm trùng baseline delta, xử lý compaction/reset, phân rã stacked token, gán model theo `turn_context`, cô lập hash path workspace, loại bỏ công cụ giả lập và bảo vệ quyền riêng tư credential. |
 
 ---
 
@@ -141,8 +142,8 @@ Toàn bộ 20 endpoint REST API chuẩn (cùng 3 static/doc routes và 1 endpoin
 | `GET` | `/api/agents/gantt/packets` | `range=today\|24h\|7d\|30d\|all` | Danh sách các gói tin tiến trình tác vụ Subagent định dạng timeline packets phục vụ vẽ Gantt |
 | `GET` | `/api/agents/graph` | `project=...&range=today\|24h\|7d\|30d\|all` | Sơ đồ mạng lưới topo quan hệ tác nhân và dự án (Topology Network Graph) |
 | `GET` | `/api/projects/leaderboard` | Bảng xếp hạng FinOps Đa LLM hợp nhất (Google, Codex, Claude) (`?range=today\|24h\|7d\|30d\|all&sort=tokens\|cost\|activity`) |
-| `GET` | `/api/openai/dashboard` | `range=today\|24h\|7d\|30d\|all` | Dashboard OpenAI/Codex cục bộ: token, workflow, models, rate limits (5h & 7d) và sessions |
-| `GET` | `/api/openai/graph` | `range=today\|24h\|7d\|30d\|all` | Sơ đồ mạng lưới Topology phân cấp 4 tầng cho OpenAI Codex |
+| `GET` | `/api/openai/dashboard` | `range=today\|24h\|7d\|30d\|all` | Dashboard OpenAI/Codex cục bộ: token (anti-double counting, baseline delta), workflow, models, rate limits snapshot và sessions an toàn |
+| `GET` | `/api/openai/graph` | `range=today\|24h\|7d\|30d\|all` | Đồ thị workspace/session quan sát được cho OpenAI Codex (Zero fake tools, path hash isolation) |
 | `POST` | `/api/openai/refresh` | Không | Quét lại `~/.codex/sessions/**/*.jsonl` theo yêu cầu (Read-only, không credential) |
 | `GET` | `/api/claude/dashboard` | `range=today\|24h\|7d\|30d\|all` | Dashboard Anthropic Claude Code CLI cục bộ: token, tools, models, projects |
 | `GET` | `/api/claude/graph` | `range=today\|24h\|7d\|30d\|all` | Sơ đồ mạng lưới Topology phân cấp 4 tầng cho Anthropic Claude |

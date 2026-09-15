@@ -61,7 +61,7 @@ local_tailer:
 # 6. Khối cấu hình Giám Sát OpenAI Codex (Thụ động từ session JSONL cục bộ)
 openai_monitor:
   enabled: true                 # Bật trình thu thập OpenAI Codex (Khuyến nghị: true)
-  sessions_dir: ""              # Để trống để tự động dùng ~/.codex/sessions (Zero credentials, không đọc auth.json)
+  sessions_dir: ""              # Để trống để tự động dùng $CODEX_HOME/sessions (mặc định ~/.codex/sessions) (Zero credentials, không đọc auth.json)
   poll_interval_seconds: 10     # Tần suất kiểm tra phiên làm việc mới (giây)
   max_session_rows: 50          # Số phiên làm việc gần nhất hiển thị trên dashboard
   max_files: 1000               # Giới hạn số file session JSONL quét tối đa
@@ -110,6 +110,20 @@ Thay vì chỉ đọc duy nhất một đường dẫn cố định, `collector/
 - Quét toàn bộ các thư mục con trong `~/.gemini/*` để tìm kiếm các thư mục có dạng `~/.gemini/<dir>/brain`.
 - **Quy tắc loại trừ an toàn**: Tự động bỏ qua các thư mục chứa từ khóa `"backup"`, `"tmp"`, hoặc `"profile"` trong tên để triệt tiêu việc đọc trùng lặp log cũ hoặc file tạm rác.
 - Hợp nhất và khử trùng lặp với đường dẫn `cfg.LocalTailer.IDEBrainDir` được cấu hình trong `config.yaml`.
+
+#### D. Cơ Chế Thu Thập & Phân Định Thứ Tự Đường Dẫn OpenAI Codex (Codex Discovery & Privacy Protocol)
+Module `collector/codex_monitor.go` triển khai quy trình đọc log phiên làm việc Codex với các nguyên tắc an toàn nghiêm ngặt:
+1. **Thứ tự ưu tiên 3 cấp đường dẫn sessions**:
+   - Ưu tiên 1: Giá trị khai báo rõ ràng trong `config.yaml` (`cfg.OpenAIMonitor.SessionsDir`).
+   - Ưu tiên 2: Biến môi trường hệ thống `$CODEX_HOME/sessions` (nếu `$CODEX_HOME` được thiết lập theo chuẩn OpenAI).
+   - Ưu tiên 3: Đường dẫn mặc định người dùng `~/.codex/sessions`.
+2. **Ranh giới bảo mật & Không truy cập Credential (Zero Credential Contract)**:
+   - Trình thu thập mở file log ở chế độ chỉ đọc, tuyệt đối không truy cập file `auth.json` hay Windows Credential Manager / Keychain.
+   - Không thực hiện bất kỳ lệnh đăng nhập hay refresh token nào ra Internet.
+   - Không bóc tách nội dung câu lệnh, prompt hay response vào DTO hay database; chỉ trích xuất các metadata số lượng token, thời gian và model.
+3. **Phân biệt giới hạn dòng giao diện và tổng hợp toàn vẹn**:
+   - `max_session_rows` (mặc định 50) chỉ dùng để cắt giảm số lượng dòng hiển thị trên bảng Session Table của Web UI để tránh quá tải DOM.
+   - Khi tổng hợp số liệu cho Bảng xếp hạng FinOps Đa LLM (`GET /api/projects/leaderboard`), hệ thống sử dụng kênh `DashboardForAggregation` đọc toàn bộ phiên hợp lệ mà không bị giới hạn 50 dòng, đảm bảo số liệu tổng không bao giờ bị thiếu hụt.
 
 ---
 

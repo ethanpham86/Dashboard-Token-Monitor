@@ -2266,6 +2266,7 @@
         <div class="openai-panel-title">⏱️ Hạn Mức Tác Vụ OpenAI Codex (Usage Limits)</div>
         <div class="openai-panel-meta" id="openai-plan-type">LOCAL ACCOUNT · RATE LIMITS</div>
       </div>
+      <p id="codex-source-note" style="font-size:11px;color:#94a3b8;">Chỉ có session cục bộ; không xác định người dùng hay tổng usage tài khoản.</p>
       <div class="openai-limits">
         <div class="openai-limit-card">
           <div class="openai-limit-top"><span id="openai-primary-label">Cửa sổ chính</span><span class="openai-limit-value" id="openai-primary-value">Chưa có dữ liệu</span></div>
@@ -5138,17 +5139,17 @@
           const totalEl = document.getElementById('agent-total-fleet');
           if (totalEl) totalEl.textContent = nodeCount;
           const concEl = document.getElementById('agent-active-concurrency');
-          if (concEl) concEl.textContent = `${activeSessions} / 16`;
+          if (concEl) concEl.textContent = `${activeSessions} recent`;
           const progEl = document.getElementById('agent-concurrency-progress');
-          if (progEl) progEl.style.width = Math.min(100, Math.round((activeSessions / 16) * 100)) + '%';
+          if (progEl) progEl.style.width = '0%';
           const statusEl = document.getElementById('agent-concurrency-status');
           if (statusEl) {
             statusEl.textContent = activeSessions > 0
-              ? `${activeSessions} sessions active`
-              : 'Idle • 0 Active Tasks (Đã tắt ứng dụng)';
+              ? `${activeSessions} sessions có log gần đây`
+              : 'Không có log trong 2 phút gần đây';
           }
           const rateEl = document.getElementById('agent-task-success-rate');
-          if (rateEl) rateEl.textContent = `${Number(cachedCodexDashboard?.summary?.tool_success_percent ?? 100).toFixed(1)}%`;
+          if (rateEl) rateEl.textContent = cachedCodexDashboard?.summary?.tool_results_known > 0 ? `${Number(cachedCodexDashboard.summary.tool_success_percent).toFixed(1)}%` : 'N/A';
           const tasksEl = document.getElementById('agent-tasks-completed');
           if (tasksEl) tasksEl.textContent = `${nodeCount} nodes in graph`;
           const tokEl = document.getElementById('agent-offloaded-tokens');
@@ -5158,15 +5159,15 @@
 
           const cardFleet = totalEl ? totalEl.closest('.agent-kpi-card') : null;
           if (cardFleet) {
-            setElementHint(cardFleet, "OpenAI Codex Fleet Nodes", "CODEX FLEET", `Tổng số thực thể và nút phân cấp trong mạng lưới OpenAI Codex (${nodeCount} nodes).`, "OpenAI Codex Session Topology", `Bao gồm Root Profile, Workspaces, Sessions và Subworkers (${nodeCount} nodes trong Topology).`);
+            setElementHint(cardFleet, "OpenAI Codex Fleet Nodes", "CODEX FLEET", `Tổng số thực thể và nút phân cấp trong mạng lưới OpenAI Codex (${nodeCount} nodes).`, "OpenAI Codex Session Topology", `Bao gồm Local logs, Workspaces và Sessions (${nodeCount} nodes trong Topology).`);
           }
           const cardConc = concEl ? concEl.closest('.agent-kpi-card') : null;
           if (cardConc) {
-            setElementHint(cardConc, "Codex Local Concurrency Pool", "CONCURRENCY", `Số phiên làm việc Codex Desktop / CLI đang hoạt động song song.`, "Codex Local Sessions Telemetry", `Hiện tại: ${activeSessions} / 16 sessions active. Quét từ ~/.codex/sessions.`);
+            setElementHint(cardConc, "Codex Local Concurrency Pool", "CONCURRENCY", `Số session có log trong 2 phút; không xác nhận tiến trình hay giới hạn concurrency.`, "Codex Local Sessions Telemetry", `Hiện tại: ${activeSessions} sessions có log gần đây. Quét từ ~/.codex/sessions.`);
           }
           const cardRate = rateEl ? rateEl.closest('.agent-kpi-card') : null;
           if (cardRate) {
-            setElementHint(cardRate, "Tỷ Lệ Thực Thi Công Cụ Codex", "TOOL RELIABILITY", "Tỷ lệ thành công của các lệnh thực thi shell, patch và semantic search.", "Codex Tools Telemetry", `Tỷ lệ công cụ thành công đạt ${Number(cachedCodexDashboard?.summary?.tool_success_percent || 100).toFixed(1)}%.`);
+            setElementHint(cardRate, "Tỷ Lệ Thực Thi Công Cụ Codex", "TOOL RELIABILITY", "Tỷ lệ thành công của các lệnh thực thi shell, patch và semantic search.", "Codex Tools Telemetry", `Chỉ tính từ kết quả cấu trúc; N/A khi chưa xác định.`);
           }
           const cardOffload = tokEl ? tokEl.closest('.agent-kpi-card') : null;
           if (cardOffload) {
@@ -6308,7 +6309,7 @@
         const state = document.createElement('span');
         const active = session.status === 'ACTIVE';
         state.className = `openai-status ${active ? 'active' : 'completed'}`;
-        state.textContent = `${active ? '●' : '○'} ${active ? 'ACTIVE' : 'DONE'}`;
+        state.textContent = `${active ? '●' : '○'} ${active ? 'RECENT' : (session.status || 'IDLE')}`;
         stateCell.appendChild(state); row.appendChild(stateCell);
         appendOpenAICell(row, session.workspace || 'Không rõ');
         appendOpenAICell(row, session.model || 'OpenAI');
@@ -6326,108 +6327,30 @@
 
     function updateCodexHeader(data, rate, s) {
       if (currentAIProvider !== 'codex') return;
-      data = data || cachedCodexDashboard || {};
-      rate = rate || data.rate_limits || null;
-      s = s || data.summary || {};
-      const planNameEl = document.getElementById('txt-plan-name');
-      const planBadgeEl = document.getElementById('txt-plan-badge');
-      const emailEl = document.getElementById('txt-email');
-      const quotaEl = document.getElementById('txt-quota');
-      const expiryEl = document.getElementById('txt-expiry-date');
-      const statusEl = document.getElementById('txt-token-status');
-      const pillQuota = document.getElementById('pill-quota');
-      const pillExp = document.getElementById('pill-expiry');
-      const pillStat = document.getElementById('pill-status');
-      const syncBtn = document.getElementById('btn-header-sync');
-
-      const planType = (rate?.plan_type || 'PLUS').toUpperCase();
-      const originator = data.sessions?.[0]?.originator || 'Codex Desktop';
-      if (planNameEl) planNameEl.textContent = `OPENAI CODEX (${planType})`;
-      const isActive = (s?.active_sessions || 0) > 0;
-      if (planBadgeEl) planBadgeEl.textContent = `${originator.toUpperCase()} · ${isActive ? 'LIVE' : 'STANDBY'}`;
-      const wsNames = Array.from(new Set((data.sessions || []).map(sess => sess.workspace).filter(Boolean)));
-      if (emailEl) emailEl.textContent = wsNames.length > 0 ? `Workspaces: ${wsNames.join(', ')}` : 'Local Sessions · ~/.codex/sessions';
-
-      if (rate?.primary) {
-        const pri = rate.primary;
-        const hours = Math.round(pri.window_minutes / 60);
-        if (quotaEl) quotaEl.textContent = `${pri.used_percent}% / ${hours}h Quota Used`;
-        if (pri.resets_at) {
-          const resetDate = new Date(pri.resets_at * 1000);
-          const resetStr = resetDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-          if (expiryEl) expiryEl.textContent = `Reset lúc ${resetStr}`;
-        }
-      } else {
-        if (quotaEl) quotaEl.textContent = `${formatNumber(s?.total_tokens || 0)} Tokens`;
-        if (expiryEl) expiryEl.textContent = `${formatNumber(s?.sessions || 0)} Phiên`;
+      const plan = (rate?.plan_type || 'UNKNOWN').toUpperCase();
+      const recent = (s.active_sessions || 0) > 0;
+      const toolResult = s.tool_results_known > 0 ? `${Number(s.tool_success_percent).toFixed(1)}% tools OK` : 'Kết quả tool chưa rõ';
+      setOpenAIText('txt-plan-name', `OPENAI CODEX (${plan})`);
+      setOpenAIText('txt-plan-badge', `LOCAL LOG · ${recent ? 'RECENT' : 'IDLE'}`);
+      const workspaces = [...new Set((data.sessions || []).map(x => x.workspace).filter(Boolean))];
+      setOpenAIText('txt-email', workspaces.length ? `Workspaces: ${workspaces.join(', ')}` : 'Local sessions');
+      setOpenAIText('txt-quota', rate?.primary ? `${rate.primary.used_percent}% / ${formatOpenAIWindow(rate.primary.window_minutes)} · log${rate.stale ? ' cũ' : ''}` : 'Chưa có quota');
+      setOpenAIText('txt-expiry-date', rate?.primary?.resets_at ? new Date(rate.primary.resets_at * 1000).toLocaleString('vi-VN') : 'Chưa rõ reset');
+      setOpenAIText('txt-token-status', `${formatNumber(s.model_calls || 0)} usage updates · ${toolResult}`);
+      setOpenAIText('txt-account-type', 'Codex local sessions · chưa xác minh tài khoản');
+      setOpenAIText('txt-uuid', `SESSION: ${data.sessions?.[0]?.session_id || '—'}`);
+      setOpenAIText('txt-core-models', (data.models || []).map(x => x.model_name).join(' / ') || 'Chưa có dữ liệu');
+      setOpenAIText('txt-sub-date', 'Không có dữ liệu đăng ký');
+      setOpenAIText('txt-billing-cycle', 'Không có dữ liệu billing');
+      const snapshot = rate ? `Ghi nhận ${new Date(rate.observed_at).toLocaleString('vi-VN')} · session ${rate.session_id || 'unknown'}${rate.stale ? ' · dữ liệu cũ' : ''}` : 'Chưa có snapshot hạn mức.';
+      for (const id of ['txt-plan-badge','pill-quota','txt-quota','pill-expiry','txt-expiry-date']) {
+        setElementHint(document.getElementById(id), 'Codex local metadata', 'LOCAL SNAPSHOT', 'Metadata từ log; không xác minh tài khoản hiện tại, không truy vấn quota trực tiếp.', 'Codex sessions', snapshot);
       }
-      if (statusEl) statusEl.textContent = `${formatNumber(s?.model_calls || 0)} calls · ${Number(s?.tool_success_percent||0).toFixed(0)}% tools OK`;
-
-      const accTypeEl = document.getElementById('txt-account-type');
-      const uuidEl = document.getElementById('txt-uuid');
-      const coreModelsEl = document.getElementById('txt-core-models');
-      const subDateEl = document.getElementById('txt-sub-date');
-      const billingCycleEl = document.getElementById('txt-billing-cycle');
-
-      if (accTypeEl) accTypeEl.textContent = `OpenAI Codex (${originator})`;
-      if (uuidEl) uuidEl.textContent = `SESSION: ${data.sessions?.[0]?.session_id || 'LOCAL-CODEX'}`;
-      if (coreModelsEl && data.models?.length > 0) {
-        coreModelsEl.textContent = data.models.map(m => m.model_name).join(' / ');
+      for (const id of ['pill-status','txt-token-status']) {
+        setElementHint(document.getElementById(id), 'Codex usage observations', 'LOCAL LOG', 'Usage updates có thể gộp nhiều request. ACTIVE chỉ biểu thị log trong 2 phút gần đây.', 'Codex sessions', `${s.tool_results_known || 0} kết quả xác định / ${s.tool_calls || 0} lượt gọi tool.`);
       }
-      if (subDateEl && data.sessions?.[0]?.started_at) {
-        subDateEl.textContent = String(data.sessions[0].started_at).substring(0, 10);
-      }
-      if (billingCycleEl && rate?.primary) {
-        billingCycleEl.textContent = `Plan ${planType} · 5h (${rate.primary.used_percent}%) / 7d (${rate.secondary?.used_percent || 0}%)`;
-      }
-
-      // Cập nhật động toàn diện các thuộc tính Type-Hint cho OpenAI Codex
-      setElementHint(planBadgeEl,
-        `OpenAI Codex (${planType}) • Local Telemetry`,
-        "CODEX / PLUS TIER",
-        "Gói tài khoản OpenAI Codex Desktop cục bộ, theo dõi các phiên làm việc và hạn mức tốc độ (rate limits) trực tiếp từ máy tính.",
-        "OpenAI Codex Session Logs (~/.codex/sessions)",
-        "Cơ chế giám sát an toàn (Read-Only), không thu thập API key, access token hoặc nội dung prompt."
-      );
-
-      const priUsed = rate?.primary?.used_percent ?? 0;
-      const priMins = rate?.primary?.window_minutes ?? 300;
-      const secUsed = rate?.secondary?.used_percent ?? 0;
-      const quotaDesc = "Hạn mức gọi mô hình trong cửa sổ 5 giờ (300 phút) và 7 ngày (10,080 phút) của tài khoản Codex.";
-      const quotaNote = `Cửa sổ chính 5h: ${priUsed}% đã dùng (${priMins} phút). Cửa sổ phụ 7d: ${secUsed}% đã dùng. Reset tự động khi hết chu kỳ.`;
-      setElementHint(pillQuota, "OpenAI Codex Quota & Rate Limit Window", "RATE LIMIT / QUOTA", quotaDesc, "Codex Session Rate Limit Metadata (primary: 5h, secondary: 7d)", quotaNote);
-      setElementHint(quotaEl, "OpenAI Codex Quota & Rate Limit Window", "RATE LIMIT / QUOTA", quotaDesc, "Codex Session Rate Limit Metadata (primary: 5h, secondary: 7d)", quotaNote);
-
-      const resetDesc = "Thời điểm reset hạn mức quota của OpenAI Codex hoặc tổng số phiên làm việc được ghi nhận.";
-      const resetNote = rate?.primary?.resets_at
-        ? `Reset lúc ${new Date(rate.primary.resets_at * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} (sau ${Math.ceil(Math.max(0, rate.primary.resets_at * 1000 - Date.now()) / 60000)} phút).`
-        : `Đã ghi nhận ${formatNumber(s?.sessions || 0)} phiên làm việc cục bộ.`;
-      setElementHint(pillExp, "Chu Kỳ Reset Hạn Mức & Phiên Codex", "RESET CYCLE", resetDesc, "Codex Sessions Rate Limit Resets Unix Epoch", resetNote);
-      setElementHint(expiryEl, "Chu Kỳ Reset Hạn Mức & Phiên Codex", "RESET CYCLE", resetDesc, "Codex Sessions Rate Limit Resets Unix Epoch", resetNote);
-
-      const statDesc = "Tổng số lượt gọi mô hình và tỷ lệ thực thi công cụ (tool calls: bash, file diff, ast) thành công.";
-      const statNote = `${formatNumber(s?.model_calls || 0)} lượt gọi API, độ thành công công cụ đạt ${Number(s?.tool_success_percent||0).toFixed(0)}% (${formatNumber(s?.tool_calls || 0)} tools).`;
-      setElementHint(pillStat, "Trạng Thái Thực Thi & Công Cụ Codex", "LOCAL TELEMETRY", statDesc, "Codex Rollout JSONL Event Stream", statNote);
-      setElementHint(statusEl, "Trạng Thái Thực Thi & Công Cụ Codex", "LOCAL TELEMETRY", statDesc, "Codex Rollout JSONL Event Stream", statNote);
-
-      const wsNote = wsNames.length > 0
-        ? `Workspaces đang theo dõi (${wsNames.length}): ${wsNames.join(', ')}`
-        : "Đang theo dõi toàn bộ session trong ~/.codex/sessions";
-      setElementHint(emailEl,
-        "Codex Workspaces & Thư Mục Cục Bộ",
-        "WORKSPACE IDENTIFIER",
-        "Danh sách các Workspace và thư mục mã nguồn mà Codex đang hoạt động hoặc đã lưu session.",
-        "Codex Session Workspace CWD",
-        wsNote
-      );
-
-      setElementHint(syncBtn,
-        "Quét Lại Log OpenAI Codex",
-        "LOCAL SCANNER",
-        "Quét và đồng bộ lại các file session log từ ~/.codex/sessions vào bộ nhớ hệ thống.",
-        "Codex Session Scanner Engine",
-        "Hoạt động hoàn toàn cục bộ và an toàn."
-      );
+      setElementHint(document.getElementById('txt-email'), 'Local workspaces', 'LOCAL LOG', 'Workspace của session trong các file đã quét.', 'Codex sessions', 'Không phải danh sách người dùng.');
+      setElementHint(document.getElementById('btn-header-sync'), 'Quét Codex logs', 'READ ONLY', 'Đọc lại metadata từ session cục bộ.', 'Codex sessions', 'Không truy cập credential hoặc gọi API OpenAI.');
     }
 
     function updateClaudeHeader(data, s) {
@@ -6606,6 +6529,7 @@
         const response = await fetch('/api/openai/dashboard?range=' + encodeURIComponent(currentTimeRange));
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
+        if (currentAIProvider !== "codex") return;
         cachedCodexDashboard = data;
         const s = data.summary || {};
         const rate = data.rate_limits || null;
@@ -6622,40 +6546,17 @@
         const cacheTokEl = document.getElementById('num-cached-tokens');
         if (cacheTokEl) cacheTokEl.textContent = formatNumber(s.cached_input_tokens);
         const callsEl = document.getElementById('sub-total-calls');
-        if (callsEl) callsEl.textContent = `${formatNumber(s.model_calls)} calls`;
+        if (callsEl) callsEl.textContent = `${formatNumber(s.model_calls)} usage updates`;
         const rateEl = document.getElementById('sub-tok-rate');
         if (rateEl) rateEl.textContent = `${formatNumber(Math.round(s.tokens_per_minute || 0))} tok/m`;
         const cachePctEl = document.getElementById('sub-cache-pct');
         if (cachePctEl) cachePctEl.textContent = `${(s.cache_hit_percent || 0).toFixed(1)}%`;
 
-        // Tính toán FinOps USD cho OpenAI Codex (GPT-5/6: $2.50/M input, $1.25/M cache, $10.00/M output)
-        const freshPrompt = Math.max(0, (s.input_tokens || 0) - (s.cached_input_tokens || 0));
-        const cachedTokens = s.cached_input_tokens || 0;
-        const outputTokens = s.output_tokens || 0;
-        const actualCostUSD = ((freshPrompt * 2.50) + (cachedTokens * 1.25) + (outputTokens * 10.00)) / 1000000.0;
-        const grossCostUSD = (((s.input_tokens || 0) * 2.50) + (outputTokens * 10.00)) / 1000000.0;
-        const savingsUSD = Math.max(0, grossCostUSD - actualCostUSD);
-        const vndRate = 25400;
-
-        const costEl = document.getElementById('num-est-cost');
-        if (costEl) costEl.textContent = `$${actualCostUSD.toFixed(2)}`;
-        const savEl = document.getElementById('sub-cost-savings');
-        if (savEl) savEl.textContent = `Tiết kiệm $${savingsUSD.toFixed(2)}`;
-        const costSub = document.getElementById('txt-cost-sub');
-        if (costSub) costSub.textContent = `≈ ${Math.round(actualCostUSD * vndRate).toLocaleString('vi-VN')} ₫`;
-
-        const cardFinops = document.getElementById('card-finops-usd');
-        if (cardFinops) {
-          cardFinops.setAttribute('data-hint-desc', `Chi phí quy đổi tương đương theo biểu giá OpenAI GPT: $${actualCostUSD.toFixed(2)} USD (~${Math.round(actualCostUSD * vndRate).toLocaleString('vi-VN')} VNĐ). Tổng trước cache: $${grossCostUSD.toFixed(2)} USD.`);
-          cardFinops.setAttribute('data-hint-note', `Nhờ Prompt Caching đạt ${(s.cache_hit_percent || 0).toFixed(1)}%, bạn tiết kiệm được $${savingsUSD.toFixed(2)} USD (~${Math.round(savingsUSD * vndRate).toLocaleString('vi-VN')} VNĐ). Bấm vào để xem chi tiết.`);
-        }
-
-        currentFinopsSummary = {
-          total_grand_tokens: s.total_tokens || 0,
-          estimated_cost_usd: actualCostUSD,
-          estimated_savings_usd: savingsUSD,
-          cache_hit_percent: s.cache_hit_percent || 0
-        };
+        setOpenAIText('num-est-cost', 'N/A');
+        setOpenAIText('sub-cost-savings', 'Chưa có dữ liệu billing');
+        setOpenAIText('txt-cost-sub', 'Token log không phải hóa đơn');
+        setElementHint(document.getElementById('card-finops-usd'), 'Codex billing', 'UNKNOWN', 'Session log không xác định chi phí thực trả.', 'Local usage counters', 'Không áp dụng một đơn giá cố định cho mọi model hoặc gói ChatGPT.');
+        currentFinopsSummary = {total_grand_tokens: s.total_tokens || 0, billing_unknown: true, cache_hit_percent: s.cache_hit_percent || 0};
 
         const rangeNames = { 'today': 'tiêu thụ hôm nay (Codex)', '24h': 'tiêu thụ 24 giờ qua (Codex)', '7d': 'tiêu thụ 7 ngày qua (Codex)', '30d': 'tiêu thụ 30 ngày qua (Codex)', 'all': 'tổng tiêu thụ Codex tích lũy' };
         const grandSub = document.getElementById('txt-grand-sub');
@@ -6676,20 +6577,20 @@
         const lblM1T = document.getElementById('lbl-model1-tokens');
         if (lblM1T) lblM1T.textContent = `${m1.model_name} Tokens`;
         const lblM1C = document.getElementById('lbl-model1-calls');
-        if (lblM1C) lblM1C.textContent = `${m1.model_name} Calls`;
+        if (lblM1C) lblM1C.textContent = `${m1.model_name} Usage updates`;
         const lblM2T = document.getElementById('lbl-model2-tokens');
         if (lblM2T) lblM2T.textContent = `${m2.model_name} Tokens`;
         const lblM2C = document.getElementById('lbl-model2-calls');
-        if (lblM2C) lblM2C.textContent = `${m2.model_name} Calls`;
+        if (lblM2C) lblM2C.textContent = `${m2.model_name} Usage updates`;
 
         const txtU1 = document.getElementById('txt-ultra-tokens');
         if (txtU1) txtU1.textContent = `${formatNumber(m1.total_tokens)} (${(m1.token_pct||0).toFixed(1)}%)`;
         const txtU1C = document.getElementById('txt-ultra-calls');
-        if (txtU1C) txtU1C.textContent = `${formatNumber(m1.model_calls)} calls`;
+        if (txtU1C) txtU1C.textContent = `${formatNumber(m1.model_calls)} usage updates`;
         const txtF1 = document.getElementById('txt-flash-tokens');
         if (txtF1) txtF1.textContent = `${formatNumber(m2.total_tokens)} (${(m2.token_pct||0).toFixed(1)}%)`;
         const txtF1C = document.getElementById('txt-flash-calls');
-        if (txtF1C) txtF1C.textContent = `${formatNumber(m2.model_calls)} calls`;
+        if (txtF1C) txtF1C.textContent = `${formatNumber(m2.model_calls)} usage updates`;
 
         // 3. Cập nhật Chart.js #tokenChart
         const timeSeries = data.time_series || [];
@@ -6708,6 +6609,7 @@
             avg_latency_ms: p.avg_latency_ms || 0
           };
         });
+        cachedModelTimeSeries = (data.model_time_series || []).map(p => ({...p, prompt_tokens: p.input_tokens || 0, call_count: p.model_calls || 0}));
         cachedChartPoints = adaptedPts;
         renderChart(adaptedPts);
 
@@ -6717,21 +6619,7 @@
         renderModelChips(cachedModelList);
         updateModelDropdown(cachedModelList);
 
-        const modelTs = [];
-        if (cachedModelList.length > 0) {
-          const primaryModelName = cachedModelList[0].model_name;
-          timeSeries.forEach(p => {
-            modelTs.push({
-              time_bucket: p.time_bucket,
-              model_name: primaryModelName,
-              total_tokens: p.total_tokens || 0,
-              model_calls: p.model_calls || 0,
-              prompt_tokens: p.input_tokens || 0,
-              output_tokens: p.output_tokens || 0,
-              cached_tokens: p.cached_tokens || 0
-            });
-          });
-        }
+        const modelTs = (data.model_time_series || []).map(p => ({...p, prompt_tokens: p.input_tokens || 0, call_count: p.model_calls || 0}));
         cachedModelTimeSeries = modelTs;
         renderEChartsTimeline();
 
@@ -6739,6 +6627,8 @@
         renderProviderDailyTable(timeSeries, 'codex');
 
         // 6. Cập nhật Rate Limits & Sessions
+        setOpenAIText('codex-source-note', `${data.source_status} · ${data.files_scanned}/${data.files_discovered ?? data.files_scanned} files${data.files_truncated ? ' · đã giới hạn số file' : ''}${data.sessions_truncated ? ' · bảng đã giới hạn số dòng' : ''} · ${data.parse_errors || 0} lỗi/biến động bộ đếm. Chỉ có session cục bộ; không xác định người dùng hay tổng usage tài khoản. ACTIVE = có log trong 2 phút, không xác nhận tiến trình đang chạy. ${data.last_error || ''}`);
+        setOpenAIText('openai-plan-type', rate ? `SNAPSHOT · ${rate.plan_type || 'UNKNOWN'} · ${new Date(rate.observed_at).toLocaleString('vi-VN')}${rate.stale ? ' · DỮ LIỆU CŨ' : ''}` : 'CHƯA CÓ QUOTA');
         renderOpenAILimit('primary', rate?.primary);
         renderOpenAILimit('secondary', rate?.secondary);
         renderOpenAISessions(data.sessions);
@@ -6761,7 +6651,8 @@
       const old = btn?.textContent;
       if (btn) { btn.disabled = true; btn.textContent = '↻ Đang quét...'; }
       try {
-        await fetch('/api/openai/refresh', {method:'POST'});
+        const response = await fetch('/api/openai/refresh', {method:'POST'});
+        if (!response.ok) throw new Error(`Codex refresh HTTP ${response.status}`);
         await loadOpenAIData();
       } finally {
         if (btn) { btn.disabled = false; btn.textContent = old || '↻ Quét Codex Logs'; }
@@ -7557,6 +7448,16 @@
       cachedChartPoints = pts;
       const labels = pts.map(p => p.time_bucket.split(' ')[1] || p.time_bucket);
 
+      if (currentAIProvider === 'codex' && currentTab === 'model') {
+        const names = [...new Set((cachedModelTimeSeries || []).map(p => p.model_name))];
+        const datasets = names.map((name, i) => {
+          const totals = new Map((cachedModelTimeSeries || []).filter(p => p.model_name === name).map(p => [p.time_bucket, p.total_tokens]));
+          return {label: name, data: pts.map(p => totals.get(p.time_bucket) || 0), backgroundColor: ['#10b981','#8b5cf6','#3b82f6','#f59e0b'][i % 4], stack: 'tokens'};
+        });
+        chartInstance = new Chart(ctx, {type:'bar', data:{labels, datasets}, options:{responsive:true, maintainAspectRatio:false, scales:{x:{stacked:true},y:{stacked:true}}}});
+        return;
+      }
+
       let chartConfig = null;
 
       if (currentTab === 'token') {
@@ -7566,8 +7467,8 @@
             labels: labels,
             datasets: [
               {
-                label: 'Prompt (Input)',
-                data: pts.map(p => p.prompt_tokens),
+                label: currentAIProvider === 'codex' ? 'Uncached Input' : 'Prompt (Input)',
+                data: pts.map(p => currentAIProvider === 'codex' ? Math.max(0, p.prompt_tokens - p.cached_tokens) : p.prompt_tokens),
                 backgroundColor: '#3b82f6',
                 stack: 'tokens',
               },
@@ -7579,7 +7480,7 @@
               },
               {
                 label: 'Text Output',
-                data: pts.map(p => p.output_tokens),
+                data: pts.map(p => currentAIProvider === 'codex' ? Math.max(0, p.output_tokens - p.thinking_tokens) : p.output_tokens),
                 backgroundColor: '#10b981',
                 stack: 'tokens',
               },
@@ -8000,11 +7901,11 @@
         const liveTokEl = document.getElementById('finops-live-tokens');
         if (liveTokEl) liveTokEl.textContent = formatNumber(s.total_grand_tokens);
         const liveCostEl = document.getElementById('finops-live-cost');
-        if (liveCostEl) liveCostEl.textContent = `$${(s.estimated_cost_usd || 0).toFixed(2)}`;
+        if (liveCostEl) liveCostEl.textContent = s.billing_unknown ? "N/A" : `$${(s.estimated_cost_usd || 0).toFixed(2)}`;
         const liveVndEl = document.getElementById('finops-live-vnd');
-        if (liveVndEl) liveVndEl.textContent = `≈ ${Math.round((s.estimated_cost_usd || 0) * 25400).toLocaleString('vi-VN')} ₫`;
+        if (liveVndEl) liveVndEl.textContent = s.billing_unknown ? "Chưa có dữ liệu billing" : `≈ ${Math.round((s.estimated_cost_usd || 0) * 25400).toLocaleString('vi-VN')} ₫`;
         const liveSavEl = document.getElementById('finops-live-savings');
-        if (liveSavEl) liveSavEl.textContent = `$${(s.estimated_savings_usd || 0).toFixed(2)}`;
+        if (liveSavEl) liveSavEl.textContent = s.billing_unknown ? "N/A" : `$${(s.estimated_savings_usd || 0).toFixed(2)}`;
         const liveCacheEl = document.getElementById('finops-live-cache-pct');
         if (liveCacheEl) liveCacheEl.textContent = `${(s.cache_hit_percent || 0).toFixed(1)}% cache hit`;
 

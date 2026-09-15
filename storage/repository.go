@@ -1322,7 +1322,7 @@ type AgentLinkDTO struct {
 	Label        string `json:"label"`
 	Tokens       int64  `json:"tokens"`
 	Interactions int    `json:"interactions"`
-	Type         string `json:"type"` // DELEGATION, CONTEXT_HANDOFF, ARTIFACT_HANDOFF, FEEDBACK_LOOP, KNOWLEDGE_INJECTION, GOVERNANCE
+	Type         string `json:"type"`   // DELEGATION, CONTEXT_HANDOFF, ARTIFACT_HANDOFF, FEEDBACK_LOOP, KNOWLEDGE_INJECTION, GOVERNANCE
 	Status       string `json:"status"` // ACTIVE, COMPLETED
 }
 
@@ -1845,11 +1845,11 @@ func (s *Storage) GetAgentTopologyGraph(projectFilter string, timeRange ...strin
 	defer rows.Close()
 
 	type RoleAgg struct {
-		RoleName    string
-		TaskCount   int
-		Tokens      int64
-		IsRunning   bool
-		LastTask    string
+		RoleName  string
+		TaskCount int
+		Tokens    int64
+		IsRunning bool
+		LastTask  string
 	}
 
 	type ProjectData struct {
@@ -2869,15 +2869,10 @@ func (s *Storage) GetProjectsLeaderboard(timeRange, sortBy string, codexMonitor 
 	// 3. Thu thập dữ liệu OpenAI Codex (nếu có monitor)
 	if codexMonitor != nil && !isNilProvider(codexMonitor) {
 		dash := codexMonitor.Dashboard(r)
-		var inputRatio, cachedRatio, reasoningRatio float64
-		if dash.Summary.TotalTokens > 0 {
-			inputRatio = float64(dash.Summary.InputTokens) / float64(dash.Summary.TotalTokens)
-			cachedRatio = float64(dash.Summary.CachedInputTokens) / float64(dash.Summary.TotalTokens)
-			reasoningRatio = float64(dash.Summary.ReasoningTokens) / float64(dash.Summary.TotalTokens)
-		} else {
-			inputRatio = 0.8
-			cachedRatio = 0.0
-			reasoningRatio = 0.0
+		if full, ok := codexMonitor.(interface {
+			DashboardForAggregation(string) collector.CodexDashboardDTO
+		}); ok {
+			dash = full.DashboardForAggregation(r)
 		}
 
 		for _, sess := range dash.Sessions {
@@ -2885,13 +2880,10 @@ func (s *Storage) GetProjectsLeaderboard(timeRange, sortBy string, codexMonitor 
 			acc := getOrCreateAcc(pID, pName, pWs)
 
 			totTok := sess.TotalTokens
-			pTok := int64(float64(totTok) * inputRatio)
-			oTok := totTok - pTok
-			if oTok < 0 {
-				oTok = 0
-			}
-			cTok := int64(float64(totTok) * cachedRatio)
-			tTok := int64(float64(totTok) * reasoningRatio)
+			pTok := sess.InputTokens
+			oTok := sess.OutputTokens
+			cTok := sess.CachedInputTokens
+			tTok := sess.ReasoningTokens
 
 			nonCachedPrompt := pTok - cTok
 			if nonCachedPrompt < 0 {
@@ -2906,7 +2898,7 @@ func (s *Storage) GetProjectsLeaderboard(timeRange, sortBy string, codexMonitor 
 			acc.thinkingTokens += tTok
 			acc.costUSD += cost
 			acc.savingsUSD += sav
-			acc.totalCalls += sess.Turns
+			acc.totalCalls += sess.ModelCalls
 			acc.agentTasks += sess.ToolCalls
 
 			acc.openaiTokens += totTok
@@ -2916,7 +2908,7 @@ func (s *Storage) GetProjectsLeaderboard(timeRange, sortBy string, codexMonitor 
 			acc.openaiThinking += tTok
 			acc.openaiCostUSD += cost
 			acc.openaiSavings += sav
-			acc.openaiCalls += sess.Turns
+			acc.openaiCalls += sess.ModelCalls
 			acc.openaiTasks += sess.ToolCalls
 
 			if sess.Status == "ACTIVE" {

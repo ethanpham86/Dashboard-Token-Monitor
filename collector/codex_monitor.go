@@ -2,7 +2,9 @@ package collector
 
 import (
 	"bufio"
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -51,6 +53,8 @@ type CodexRateLimits struct {
 	Secondary  *CodexRateLimitWindow `json:"secondary,omitempty"`
 	Credits    *CodexCredits         `json:"credits,omitempty"`
 	ObservedAt time.Time             `json:"observed_at"`
+	SessionID  string                `json:"session_id,omitempty"`
+	Stale      bool                  `json:"stale"`
 }
 
 type CodexSummaryDTO struct {
@@ -67,6 +71,7 @@ type CodexSummaryDTO struct {
 	AssistantResponses int64   `json:"assistant_responses"`
 	ToolCalls          int64   `json:"tool_calls"`
 	ToolFailures       int64   `json:"tool_failures"`
+	ToolResultsKnown   int64   `json:"tool_results_known"`
 	ToolSuccessPercent float64 `json:"tool_success_percent"`
 	CacheHitPercent    float64 `json:"cache_hit_percent"`
 	AvgTokensPerTurn   float64 `json:"avg_tokens_per_turn"`
@@ -93,6 +98,7 @@ type CodexModelDTO struct {
 type CodexSessionDTO struct {
 	SessionID          string    `json:"session_id"`
 	Workspace          string    `json:"workspace"`
+	WorkspaceID        string    `json:"workspace_id"`
 	Model              string    `json:"model"`
 	ModelProvider      string    `json:"model_provider"`
 	Originator         string    `json:"originator"`
@@ -105,22 +111,38 @@ type CodexSessionDTO struct {
 	ToolCalls          int64     `json:"tool_calls"`
 	ToolFailures       int64     `json:"tool_failures"`
 	TotalTokens        int64     `json:"total_tokens"`
+	InputTokens        int64     `json:"input_tokens"`
+	CachedInputTokens  int64     `json:"cached_input_tokens"`
+	OutputTokens       int64     `json:"output_tokens"`
+	ReasoningTokens    int64     `json:"reasoning_tokens"`
+	ModelCalls         int64     `json:"model_calls"`
 	CacheHitPercent    float64   `json:"cache_hit_percent"`
 }
 
 type CodexDashboardDTO struct {
-	GeneratedAt  time.Time           `json:"generated_at"`
-	SourceStatus string              `json:"source_status"`
-	SourceLabel  string              `json:"source_label"`
-	PrivacyMode  string              `json:"privacy_mode"`
-	LastError    string              `json:"last_error,omitempty"`
-	FilesScanned int                 `json:"files_scanned"`
-	ParseErrors  int                 `json:"parse_errors"`
-	Summary      CodexSummaryDTO     `json:"summary"`
-	RateLimits   *CodexRateLimits    `json:"rate_limits,omitempty"`
-	TimeSeries   []CodexTimePointDTO `json:"time_series"`
-	Models       []CodexModelDTO     `json:"models"`
-	Sessions     []CodexSessionDTO   `json:"sessions"`
+	LastScanAt        time.Time                `json:"last_scan_at"`
+	Coverage          string                   `json:"coverage"`
+	FilesDiscovered   int                      `json:"files_discovered"`
+	FilesTruncated    bool                     `json:"files_truncated"`
+	SessionsTruncated bool                     `json:"sessions_truncated"`
+	ModelTimeSeries   []CodexModelTimePointDTO `json:"model_time_series"`
+	GeneratedAt       time.Time                `json:"generated_at"`
+	SourceStatus      string                   `json:"source_status"`
+	SourceLabel       string                   `json:"source_label"`
+	PrivacyMode       string                   `json:"privacy_mode"`
+	LastError         string                   `json:"last_error,omitempty"`
+	FilesScanned      int                      `json:"files_scanned"`
+	ParseErrors       int                      `json:"parse_errors"`
+	Summary           CodexSummaryDTO          `json:"summary"`
+	RateLimits        *CodexRateLimits         `json:"rate_limits,omitempty"`
+	TimeSeries        []CodexTimePointDTO      `json:"time_series"`
+	Models            []CodexModelDTO          `json:"models"`
+	Sessions          []CodexSessionDTO        `json:"sessions"`
+}
+
+type CodexModelTimePointDTO struct {
+	CodexTimePointDTO
+	ModelName string `json:"model_name"`
 }
 
 type codexUsageSample struct {
@@ -133,6 +155,7 @@ type codexActivitySample struct {
 	Timestamp time.Time
 	Kind      string
 	Success   bool
+	Known     bool
 }
 
 type codexUsageAggregate struct {
@@ -155,6 +178,8 @@ type codexParsedSession struct {
 	Activities    []codexActivitySample
 	RateLimits    *CodexRateLimits
 	ParseErrors   int
+	TurnEnded     bool
+	WorkspaceID   string
 }
 
 type codexLogRecord struct {
@@ -170,18 +195,21 @@ type codexTokenCountInfo struct {
 }
 
 type codexPayload struct {
-	Type          string               `json:"type"`
-	ID            string               `json:"id"`
-	SessionID     string               `json:"session_id"`
-	Timestamp     string               `json:"timestamp"`
-	CWD           string               `json:"cwd"`
-	Model         string               `json:"model"`
-	ModelProvider string               `json:"model_provider"`
-	Originator    string               `json:"originator"`
-	Usage         *CodexTokenUsage     `json:"usage"`
-	Item          *codexEventItem      `json:"item"`
-	RateLimits    json.RawMessage      `json:"rate_limits"`
-	Info          *codexTokenCountInfo `json:"info"`
+	Role             string               `json:"role"`
+	ResponseID       string               `json:"response_id"`
+	ThreadTokenUsage *CodexTokenUsage     `json:"thread_token_usage"`
+	Type             string               `json:"type"`
+	ID               string               `json:"id"`
+	SessionID        string               `json:"session_id"`
+	Timestamp        string               `json:"timestamp"`
+	CWD              string               `json:"cwd"`
+	Model            string               `json:"model"`
+	ModelProvider    string               `json:"model_provider"`
+	Originator       string               `json:"originator"`
+	Usage            *CodexTokenUsage     `json:"usage"`
+	Item             *codexEventItem      `json:"item"`
+	RateLimits       json.RawMessage      `json:"rate_limits"`
+	Info             *codexTokenCountInfo `json:"info"`
 }
 
 type codexEventItem struct {
@@ -204,16 +232,17 @@ type codexRateLimitPayload struct {
 }
 
 type CodexMonitor struct {
-	cfg         config.OpenAIMonitorConfig
-	sessionsDir string
-	mu          sync.RWMutex
-	refreshMu   sync.Mutex
-	files       map[string]*codexParsedSession
-	lastScan    time.Time
-	lastError   string
-	ctx         context.Context
-	cancel      context.CancelFunc
-	wg          sync.WaitGroup
+	cfg             config.OpenAIMonitorConfig
+	sessionsDir     string
+	mu              sync.RWMutex
+	refreshMu       sync.Mutex
+	files           map[string]*codexParsedSession
+	filesDiscovered int
+	lastScan        time.Time
+	lastError       string
+	ctx             context.Context
+	cancel          context.CancelFunc
+	wg              sync.WaitGroup
 }
 
 func NewCodexMonitor(cfg config.OpenAIMonitorConfig) *CodexMonitor {
@@ -230,6 +259,9 @@ func NewCodexMonitor(cfg config.OpenAIMonitorConfig) *CodexMonitor {
 func resolveCodexSessionsDir(configured string) string {
 	configured = strings.TrimSpace(os.ExpandEnv(configured))
 	if configured == "" {
+		if codexHome := strings.TrimSpace(os.Getenv("CODEX_HOME")); codexHome != "" {
+			return filepath.Join(codexHome, "sessions")
+		}
 		home, err := os.UserHomeDir()
 		if err != nil {
 			return filepath.Join(".codex", "sessions")
@@ -305,15 +337,20 @@ func (m *CodexMonitor) Refresh() error {
 	m.refreshMu.Lock()
 	defer m.refreshMu.Unlock()
 
-	entries, err := collectCodexSessionFiles(m.sessionsDir, m.cfg.MaxFiles)
+	entries, err := collectCodexSessionFiles(m.sessionsDir, 0)
 	if err != nil {
 		m.mu.Lock()
 		m.lastScan = time.Now()
-		m.lastError = err.Error()
+		m.lastError = "Không thể đọc thư mục session Codex; kiểm tra đường dẫn và quyền truy cập."
 		m.mu.Unlock()
 		return err
 	}
 
+	discovered := len(entries)
+	if m.cfg.MaxFiles > 0 && len(entries) > m.cfg.MaxFiles {
+		entries = entries[:m.cfg.MaxFiles]
+	}
+	scanFailures := 0
 	m.mu.RLock()
 	old := make(map[string]*codexParsedSession, len(m.files))
 	for path, parsed := range m.files {
@@ -329,6 +366,7 @@ func (m *CodexMonitor) Refresh() error {
 		}
 		parsed, parseErr := parseCodexSessionFile(entry.path, entry.size, entry.modTime)
 		if parseErr != nil {
+			scanFailures++
 			if cached, ok := old[entry.path]; ok {
 				cachedCopy := *cached
 				cachedCopy.ParseErrors++
@@ -341,9 +379,16 @@ func (m *CodexMonitor) Refresh() error {
 
 	m.mu.Lock()
 	m.files = next
+	m.filesDiscovered = discovered
 	m.lastScan = time.Now()
 	m.lastError = ""
+	if scanFailures > 0 {
+		m.lastError = fmt.Sprintf("Không đọc được %d file session Codex.", scanFailures)
+	}
 	m.mu.Unlock()
+	if scanFailures > 0 {
+		return errors.New("Codex session scan incomplete")
+	}
 	return nil
 }
 
@@ -365,7 +410,7 @@ func collectCodexSessionFiles(root string, maxFiles int) ([]codexFileEntry, erro
 	entries := make([]codexFileEntry, 0, 64)
 	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
-			return nil
+			return walkErr
 		}
 		if d.IsDir() || strings.ToLower(filepath.Ext(d.Name())) != ".jsonl" {
 			return nil
@@ -374,7 +419,10 @@ func collectCodexSessionFiles(root string, maxFiles int) ([]codexFileEntry, erro
 			return nil
 		}
 		fileInfo, infoErr := d.Info()
-		if infoErr != nil || !fileInfo.Mode().IsRegular() {
+		if infoErr != nil {
+			return infoErr
+		}
+		if !fileInfo.Mode().IsRegular() {
 			return nil
 		}
 		entries = append(entries, codexFileEntry{path: path, size: fileInfo.Size(), modTime: fileInfo.ModTime()})
@@ -383,7 +431,12 @@ func collectCodexSessionFiles(root string, maxFiles int) ([]codexFileEntry, erro
 	if err != nil {
 		return nil, err
 	}
-	sort.Slice(entries, func(i, j int) bool { return entries[i].modTime.After(entries[j].modTime) })
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].modTime.Equal(entries[j].modTime) {
+			return entries[i].path < entries[j].path
+		}
+		return entries[i].modTime.After(entries[j].modTime)
+	})
 	if maxFiles > 0 && len(entries) > maxFiles {
 		entries = entries[:maxFiles]
 	}
@@ -404,9 +457,17 @@ func parseCodexSessionFile(path string, size int64, modTime time.Time) (*codexPa
 		Model:   "OpenAI (unknown)",
 	}
 	scanner := bufio.NewScanner(f)
+	scanner.Split(func(data []byte, atEOF bool) (int, []byte, error) {
+		if atEOF && !bytes.Contains(data, []byte("\n")) && !json.Valid(bytes.TrimSpace(data)) {
+			return len(data), nil, nil
+		}
+		return bufio.ScanLines(data, atEOF)
+	})
 	scanner.Buffer(make([]byte, 64*1024), codexScannerMaxToken)
 	currentModel := parsed.Model
-	var prevTotalTokens int64
+	var previous CodexTokenUsage
+	seenResponses := make(map[string]bool)
+	var responseActivities, itemActivities []codexActivitySample
 	for scanner.Scan() {
 		var record codexLogRecord
 		if err := json.Unmarshal(scanner.Bytes(), &record); err != nil {
@@ -424,6 +485,9 @@ func parseCodexSessionFile(path string, size int64, modTime time.Time) (*codexPa
 			parsed.UpdatedAt = ts
 		}
 
+		if record.Type != "session_meta" && record.Type != "turn_context" && record.Type != "token_usage_record" && record.Type != "event_msg" && record.Type != "response_item" {
+			continue
+		}
 		var payload codexPayload
 		if len(record.Payload) > 0 && json.Unmarshal(record.Payload, &payload) != nil {
 			parsed.ParseErrors++
@@ -433,6 +497,7 @@ func parseCodexSessionFile(path string, size int64, modTime time.Time) (*codexPa
 		case "session_meta":
 			parsed.SessionID = firstNonEmpty(payload.SessionID, payload.ID, parsed.SessionID)
 			parsed.Workspace = safeWorkspaceName(payload.CWD)
+			parsed.WorkspaceID = fmt.Sprintf("%x", sha256.Sum256([]byte(payload.CWD)))
 			parsed.ModelProvider = payload.ModelProvider
 			parsed.Originator = payload.Originator
 			if metaTime := parseCodexTimestamp(payload.Timestamp); !metaTime.IsZero() {
@@ -447,12 +512,35 @@ func parseCodexSessionFile(path string, size int64, modTime time.Time) (*codexPa
 				parsed.Workspace = safeWorkspaceName(payload.CWD)
 			}
 		case "token_usage_record":
-			if payload.Usage != nil {
-				parsed.Usage = append(parsed.Usage, codexUsageSample{Timestamp: ts, Model: currentModel, Usage: *payload.Usage})
+			if payload.Usage != nil && (payload.ResponseID == "" || !seenResponses[payload.ResponseID]) {
+				if payload.ResponseID != "" {
+					seenResponses[payload.ResponseID] = true
+				}
+				if payload.ThreadTokenUsage != nil {
+					appendCodexCumulative(parsed, *payload.ThreadTokenUsage, &previous, ts, currentModel)
+				} else {
+					parsed.Usage = append(parsed.Usage, codexUsageSample{Timestamp: ts, Model: currentModel, Usage: *payload.Usage})
+					addCodexCounters(&previous, *payload.Usage)
+				}
+			}
+		case "response_item":
+			if payload.Type == "function_call" || payload.Type == "custom_tool_call" || payload.Type == "local_shell_call" {
+				responseActivities = append(responseActivities, codexActivitySample{Timestamp: ts, Kind: "tool"})
 			}
 		case "event_msg":
-			parseCodexEvent(parsed, payload, ts, currentModel, &prevTotalTokens)
+			before := len(parsed.Activities)
+			parseCodexEvent(parsed, payload, ts, currentModel, &previous)
+			if payload.Type == "item_completed" && len(parsed.Activities) > before && parsed.Activities[len(parsed.Activities)-1].Kind == "tool" {
+				itemActivities = append(itemActivities, parsed.Activities[len(parsed.Activities)-1])
+				parsed.Activities = parsed.Activities[:before]
+			}
 		}
+	}
+	// Rollouts expose tool invocations separately; opaque outputs do not establish success.
+	if len(responseActivities) > 0 {
+		parsed.Activities = append(parsed.Activities, responseActivities...)
+	} else {
+		parsed.Activities = append(parsed.Activities, itemActivities...)
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, err
@@ -469,9 +557,12 @@ func parseCodexSessionFile(path string, size int64, modTime time.Time) (*codexPa
 	return parsed, nil
 }
 
-func parseCodexEvent(parsed *codexParsedSession, payload codexPayload, ts time.Time, currentModel string, prevTotalTokens *int64) {
+func parseCodexEvent(parsed *codexParsedSession, payload codexPayload, ts time.Time, currentModel string, previous *CodexTokenUsage) {
 	switch payload.Type {
+	case "task_complete", "turn_aborted":
+		parsed.TurnEnded = true
 	case "task_started":
+		parsed.TurnEnded = false
 		parsed.Activities = append(parsed.Activities, codexActivitySample{Timestamp: ts, Kind: "turn", Success: true})
 	case "item_completed":
 		if payload.Item == nil {
@@ -488,21 +579,13 @@ func parseCodexEvent(parsed *codexParsedSession, payload codexPayload, ts time.T
 			if strings.EqualFold(payload.Item.Status, "failed") || strings.EqualFold(payload.Item.Status, "error") {
 				success = false
 			}
-			parsed.Activities = append(parsed.Activities, codexActivitySample{Timestamp: ts, Kind: "tool", Success: success})
+			parsed.Activities = append(parsed.Activities, codexActivitySample{Timestamp: ts, Kind: "tool", Success: success, Known: payload.Item.ExitCode != nil || payload.Item.Status == "completed" || payload.Item.Status == "failed" || payload.Item.Status == "error"})
 		}
 	case "token_count":
 		if payload.Info != nil {
 			tot := payload.Info.TotalTokenUsage
-			last := payload.Info.LastTokenUsage
-			if tot != nil && last != nil && prevTotalTokens != nil {
-				if tot.TotalTokens > *prevTotalTokens {
-					*prevTotalTokens = tot.TotalTokens
-					parsed.Usage = append(parsed.Usage, codexUsageSample{
-						Timestamp: ts,
-						Model:     currentModel,
-						Usage:     *last,
-					})
-				}
+			if tot != nil {
+				appendCodexCumulative(parsed, *tot, previous, ts, currentModel)
 			}
 		}
 		if len(payload.RateLimits) == 0 || string(payload.RateLimits) == "null" {
@@ -524,8 +607,36 @@ func parseCodexEvent(parsed *codexParsedSession, payload codexPayload, ts time.T
 				Balance:    rawScalarString(source.Credits.Balance),
 			}
 		}
-		parsed.RateLimits = rate
+		if rate.LimitID == "" || rate.LimitID == "codex" {
+			parsed.RateLimits = rate
+		}
 	}
+}
+
+// Both record formats describe the same thread counters. Use component deltas once.
+func appendCodexCumulative(parsed *codexParsedSession, total CodexTokenUsage, previous *CodexTokenUsage, ts time.Time, model string) {
+	if total == *previous {
+		return
+	}
+	delta := CodexTokenUsage{InputTokens: total.InputTokens - previous.InputTokens, CachedInputTokens: total.CachedInputTokens - previous.CachedInputTokens, CacheWriteInputTokens: total.CacheWriteInputTokens - previous.CacheWriteInputTokens, OutputTokens: total.OutputTokens - previous.OutputTokens, ReasoningOutputTokens: total.ReasoningOutputTokens - previous.ReasoningOutputTokens, TotalTokens: total.TotalTokens - previous.TotalTokens}
+	*previous = total
+	if delta.TotalTokens < 0 || delta.InputTokens < 0 || delta.OutputTokens < 0 || delta.CachedInputTokens < 0 || delta.ReasoningOutputTokens < 0 || delta.CacheWriteInputTokens < 0 {
+		// A compaction/reset changes the baseline; it is not new billed usage.
+		parsed.ParseErrors++
+		return
+	}
+	if delta.TotalTokens > 0 {
+		parsed.Usage = append(parsed.Usage, codexUsageSample{Timestamp: ts, Model: model, Usage: delta})
+	}
+}
+
+func addCodexCounters(target *CodexTokenUsage, usage CodexTokenUsage) {
+	target.InputTokens += usage.InputTokens
+	target.CachedInputTokens += usage.CachedInputTokens
+	target.CacheWriteInputTokens += usage.CacheWriteInputTokens
+	target.OutputTokens += usage.OutputTokens
+	target.ReasoningOutputTokens += usage.ReasoningOutputTokens
+	target.TotalTokens += usage.TotalTokens
 }
 
 func rawScalarString(raw json.RawMessage) string {
@@ -584,6 +695,19 @@ func firstNonEmpty(values ...string) string {
 }
 
 func (m *CodexMonitor) Dashboard(timeRange string) CodexDashboardDTO {
+	return m.dashboard(timeRange, true)
+}
+
+// DashboardForAggregation returns every monitored session, without the UI row limit.
+func (m *CodexMonitor) DashboardForAggregation(timeRange string) CodexDashboardDTO {
+	return m.dashboard(timeRange, false)
+}
+
+func (m *CodexMonitor) dashboard(timeRange string, limitRows bool) CodexDashboardDTO {
+	timeRange = strings.ToLower(strings.TrimSpace(timeRange))
+	if timeRange == "1d" {
+		timeRange = "24h"
+	}
 	m.mu.RLock()
 	files := make([]*codexParsedSession, 0, len(m.files))
 	for _, session := range m.files {
@@ -591,20 +715,26 @@ func (m *CodexMonitor) Dashboard(timeRange string) CodexDashboardDTO {
 	}
 	lastScan := m.lastScan
 	lastError := m.lastError
+	discovered := m.filesDiscovered
 	m.mu.RUnlock()
 
 	now := time.Now()
 	cutoff := codexRangeCutoff(now, timeRange)
 	result := CodexDashboardDTO{
-		GeneratedAt:  now,
-		SourceStatus: "READY",
-		SourceLabel:  "~/.codex/sessions/**/*.jsonl",
-		PrivacyMode:  "READ_ONLY_NO_CREDENTIALS_NO_PROMPT_CONTENT",
-		LastError:    lastError,
-		FilesScanned: len(files),
-		TimeSeries:   []CodexTimePointDTO{},
-		Models:       []CodexModelDTO{},
-		Sessions:     []CodexSessionDTO{},
+		LastScanAt:      lastScan,
+		Coverage:        "LOCAL_SESSION_LOGS_ONLY_NOT_ACCOUNT_USAGE",
+		FilesDiscovered: discovered,
+		FilesTruncated:  m.cfg.MaxFiles > 0 && discovered > m.cfg.MaxFiles,
+		ModelTimeSeries: []CodexModelTimePointDTO{},
+		GeneratedAt:     now,
+		SourceStatus:    "READY",
+		SourceLabel:     "Configured Codex sessions/**/*.jsonl",
+		PrivacyMode:     "READ_ONLY_NO_CREDENTIALS_NO_PROMPT_CONTENT",
+		LastError:       lastError,
+		FilesScanned:    len(files),
+		TimeSeries:      []CodexTimePointDTO{},
+		Models:          []CodexModelDTO{},
+		Sessions:        []CodexSessionDTO{},
 	}
 	if !m.cfg.Enabled {
 		result.SourceStatus = "DISABLED"
@@ -612,6 +742,9 @@ func (m *CodexMonitor) Dashboard(timeRange string) CodexDashboardDTO {
 	}
 	if lastError != "" {
 		result.SourceStatus = "UNAVAILABLE"
+		if len(files) > 0 {
+			result.SourceStatus = "PARTIAL"
+		}
 	} else if len(files) == 0 {
 		result.SourceStatus = "EMPTY"
 	} else if lastScan.IsZero() {
@@ -620,21 +753,36 @@ func (m *CodexMonitor) Dashboard(timeRange string) CodexDashboardDTO {
 
 	buckets := make(map[string]*codexUsageAggregate)
 	models := make(map[string]*codexUsageAggregate)
+	modelBuckets := make(map[string]map[string]*codexUsageAggregate)
 	var firstUsage, lastUsage time.Time
 	var latestRate *CodexRateLimits
 
+	sort.Slice(files, func(i, j int) bool {
+		if files[i].ModTime.Equal(files[j].ModTime) {
+			return files[i].Path < files[j].Path
+		}
+		return files[i].ModTime.After(files[j].ModTime)
+	})
+	seenSessions := make(map[string]bool)
 	for _, session := range files {
+		if seenSessions[session.SessionID] {
+			continue
+		}
+		seenSessions[session.SessionID] = true
 		row := CodexSessionDTO{
-			SessionID: session.SessionID, Workspace: session.Workspace, Model: session.Model,
+			SessionID: session.SessionID, Workspace: session.Workspace, WorkspaceID: session.WorkspaceID, Model: session.Model,
 			ModelProvider: session.ModelProvider, Originator: session.Originator,
-			StartedAt: session.StartedAt, UpdatedAt: session.UpdatedAt, Status: "COMPLETED",
+			StartedAt: session.StartedAt, UpdatedAt: session.UpdatedAt, Status: "IDLE",
+		}
+		if session.TurnEnded {
+			row.Status = "COMPLETED"
 		}
 		lastActivity := session.UpdatedAt
 		if lastActivity.IsZero() {
 			lastActivity = session.ModTime
 		}
 		activityAge := now.Sub(lastActivity)
-		if activityAge >= 0 && activityAge <= 2*time.Minute {
+		if !session.TurnEnded && activityAge >= 0 && activityAge <= 2*time.Minute {
 			row.Status = "ACTIVE"
 		}
 		if !row.StartedAt.IsZero() && !row.UpdatedAt.IsZero() {
@@ -645,15 +793,24 @@ func (m *CodexMonitor) Dashboard(timeRange string) CodexDashboardDTO {
 		}
 		if session.RateLimits != nil && (latestRate == nil || session.RateLimits.ObservedAt.After(latestRate.ObservedAt)) {
 			copyRate := *session.RateLimits
+			copyRate.SessionID = session.SessionID
+			copyRate.Stale = now.Sub(copyRate.ObservedAt) > 2*time.Minute || (copyRate.Primary != nil && copyRate.Primary.ResetsAt > 0 && copyRate.Primary.ResetsAt <= now.Unix())
 			latestRate = &copyRate
 		}
+		var rowInput, rowCached int64
 		for _, sample := range session.Usage {
 			if !cutoff.IsZero() && sample.Timestamp.Before(cutoff) {
 				continue
 			}
 			addCodexUsage(&result.Summary, sample.Usage)
 			row.TotalTokens += sample.Usage.TotalTokens
-			row.CacheHitPercent += float64(sample.Usage.CachedInputTokens)
+			row.InputTokens += sample.Usage.InputTokens
+			row.CachedInputTokens += sample.Usage.CachedInputTokens
+			row.OutputTokens += sample.Usage.OutputTokens
+			row.ReasoningTokens += sample.Usage.ReasoningOutputTokens
+			row.ModelCalls++
+			rowInput += sample.Usage.InputTokens
+			rowCached += sample.Usage.CachedInputTokens
 			result.Summary.ModelCalls++
 			bucketKey := codexBucketKey(sample.Timestamp, timeRange)
 			bucket := buckets[bucketKey]
@@ -669,20 +826,19 @@ func (m *CodexMonitor) Dashboard(timeRange string) CodexDashboardDTO {
 				models[modelName] = modelAgg
 			}
 			addCodexAggregate(modelAgg, sample.Usage)
+			if modelBuckets[bucketKey] == nil {
+				modelBuckets[bucketKey] = make(map[string]*codexUsageAggregate)
+			}
+			if modelBuckets[bucketKey][modelName] == nil {
+				modelBuckets[bucketKey][modelName] = &codexUsageAggregate{}
+			}
+			addCodexAggregate(modelBuckets[bucketKey][modelName], sample.Usage)
 			if firstUsage.IsZero() || sample.Timestamp.Before(firstUsage) {
 				firstUsage = sample.Timestamp
 			}
 			if lastUsage.IsZero() || sample.Timestamp.After(lastUsage) {
 				lastUsage = sample.Timestamp
 			}
-		}
-		var rowInput, rowCached int64
-		for _, sample := range session.Usage {
-			if !cutoff.IsZero() && sample.Timestamp.Before(cutoff) {
-				continue
-			}
-			rowInput += sample.Usage.InputTokens
-			rowCached += sample.Usage.CachedInputTokens
 		}
 		if rowInput > 0 {
 			row.CacheHitPercent = float64(rowCached) * 100 / float64(rowInput)
@@ -701,7 +857,10 @@ func (m *CodexMonitor) Dashboard(timeRange string) CodexDashboardDTO {
 			case "tool":
 				row.ToolCalls++
 				result.Summary.ToolCalls++
-				if !activity.Success {
+				if activity.Known {
+					result.Summary.ToolResultsKnown++
+				}
+				if activity.Known && !activity.Success {
 					row.ToolFailures++
 					result.Summary.ToolFailures++
 				}
@@ -721,8 +880,8 @@ func (m *CodexMonitor) Dashboard(timeRange string) CodexDashboardDTO {
 	if result.Summary.InputTokens > 0 {
 		result.Summary.CacheHitPercent = float64(result.Summary.CachedInputTokens) * 100 / float64(result.Summary.InputTokens)
 	}
-	if result.Summary.ToolCalls > 0 {
-		result.Summary.ToolSuccessPercent = float64(result.Summary.ToolCalls-result.Summary.ToolFailures) * 100 / float64(result.Summary.ToolCalls)
+	if result.Summary.ToolResultsKnown > 0 {
+		result.Summary.ToolSuccessPercent = float64(result.Summary.ToolResultsKnown-result.Summary.ToolFailures) * 100 / float64(result.Summary.ToolResultsKnown)
 	}
 	if result.Summary.Turns > 0 {
 		result.Summary.AvgTokensPerTurn = float64(result.Summary.TotalTokens) / float64(result.Summary.Turns)
@@ -748,6 +907,20 @@ func (m *CodexMonitor) Dashboard(timeRange string) CodexDashboardDTO {
 			TotalTokens: a.TotalTokens, ModelCalls: a.Calls,
 		})
 	}
+	for _, key := range bucketKeys {
+		names := make([]string, 0, len(modelBuckets[key]))
+		for name := range modelBuckets[key] {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			a := modelBuckets[key][name]
+			result.ModelTimeSeries = append(result.ModelTimeSeries, CodexModelTimePointDTO{ModelName: name, CodexTimePointDTO: CodexTimePointDTO{TimeBucket: key, InputTokens: a.InputTokens, CachedTokens: a.CachedInputTokens, OutputTokens: a.OutputTokens, ReasoningTokens: a.ReasoningOutputTokens, TotalTokens: a.TotalTokens, ModelCalls: a.Calls}})
+		}
+	}
+	if result.ParseErrors > 0 || result.FilesTruncated {
+		result.SourceStatus = "PARTIAL"
+	}
 	for name, a := range models {
 		pct := 0.0
 		if result.Summary.TotalTokens > 0 {
@@ -757,7 +930,8 @@ func (m *CodexMonitor) Dashboard(timeRange string) CodexDashboardDTO {
 	}
 	sort.Slice(result.Models, func(i, j int) bool { return result.Models[i].TotalTokens > result.Models[j].TotalTokens })
 	sort.Slice(result.Sessions, func(i, j int) bool { return result.Sessions[i].UpdatedAt.After(result.Sessions[j].UpdatedAt) })
-	if m.cfg.MaxSessionRows > 0 && len(result.Sessions) > m.cfg.MaxSessionRows {
+	if limitRows && m.cfg.MaxSessionRows > 0 && len(result.Sessions) > m.cfg.MaxSessionRows {
+		result.SessionsTruncated = true
 		result.Sessions = result.Sessions[:m.cfg.MaxSessionRows]
 	}
 	return result
@@ -806,240 +980,52 @@ func codexBucketKey(ts time.Time, timeRange string) string {
 	return local.Format("2006-01-02")
 }
 
-// Graph tạo đồ thị mạng lưới phân cấp 4 tầng tương tác cho OpenAI/Codex theo chuẩn interactive_topology_engine.
+// Graph contains observed workspaces and sessions only. ACTIVE means recent log activity.
 func (m *CodexMonitor) Graph(timeRange string) *AITopologyGraphDTO {
-	dashboard := m.Dashboard(timeRange)
-
-	categories := []AITopologyCategoryDTO{
-		{Name: "🏢 Dự Án (Workspaces)"},
-		{Name: "🤖 Codex Primary Engine"},
-		{Name: "💻 Shell / CLI Executor"},
-		{Name: "📝 File Patcher & Diff"},
-		{Name: "🔍 Semantic AST Search"},
-		{Name: "🌐 External Connector"},
-		{Name: "⚡ Task Subworker"},
-		{Name: "👑 Root Controller & Profile"},
+	d := m.dashboard(timeRange, false)
+	g := &AITopologyGraphDTO{Projects: []AITopologyProjectDTO{}, Nodes: []AITopologyNodeDTO{}, Links: []AITopologyLinkDTO{}, Categories: []AITopologyCategoryDTO{{Name: "Workspaces"}, {Name: "Codex sessions"}, {Name: ""}, {Name: ""}, {Name: ""}, {Name: ""}, {Name: ""}, {Name: "Local logs"}}, ActiveConcurrency: int(d.Summary.ActiveSessions), ActiveSessions: int(d.Summary.ActiveSessions)}
+	if len(d.Sessions) == 0 {
+		return g
 	}
-
-	// Nhóm các session theo Workspace
-	workspaceMap := make(map[string]*struct {
-		Name     string
-		Tokens   int64
-		Sessions int
-		Status   string
-	})
-
-	for _, s := range dashboard.Sessions {
-		wName := s.Workspace
-		if wName == "" {
-			wName = "Codex Local Workspace"
-		} else {
-			wName = filepath.Base(wName)
-		}
-		item := workspaceMap[wName]
-		if item == nil {
-			item = &struct {
-				Name     string
-				Tokens   int64
-				Sessions int
-				Status   string
-			}{Name: wName, Status: s.Status}
-			workspaceMap[wName] = item
-		}
-		item.Tokens += s.TotalTokens
-		item.Sessions++
-		if s.Status == "ACTIVE" {
-			item.Status = "ACTIVE"
-		}
-	}
-
-	if len(workspaceMap) == 0 {
-		return &AITopologyGraphDTO{
-			Projects:          []AITopologyProjectDTO{},
-			Nodes:             []AITopologyNodeDTO{},
-			Links:             []AITopologyLinkDTO{},
-			Categories:        categories,
-			ActiveConcurrency: 0,
-			ActiveSessions:    0,
-		}
-	}
-
 	rootID := "root-openai-profile"
-	rootStatus := "COMPLETED"
-	if dashboard.Summary.ActiveSessions > 0 {
-		rootStatus = "RUNNING"
+	g.Nodes = append(g.Nodes, AITopologyNodeDTO{ID: rootID, Name: "Codex local sessions", Category: 7, SymbolSize: 64, Tokens: d.Summary.TotalTokens, TaskCount: int(d.Summary.Sessions), Status: "IDLE", Role: "Local log aggregate"})
+	groups := make(map[string][]CodexSessionDTO)
+	for _, row := range d.Sessions {
+		key := firstNonEmpty(row.WorkspaceID, row.Workspace)
+		groups[key] = append(groups[key], row)
 	}
-
-	rootX := 1500.0
-	rootY := 40.0
-	nodes := []AITopologyNodeDTO{
-		{
-			ID:         rootID,
-			Name:       "OpenAI Codex • Local Session Fleet",
-			Category:   7,
-			SymbolSize: 64,
-			Role:       "Root Controller • OpenAI / Codex CLI Engine",
-			Project:    "OpenAI Workspace Ecosystem",
-			ProjectID:  "root",
-			Status:     rootStatus,
-			Tokens:     dashboard.Summary.TotalTokens,
-			TaskCount:  int(dashboard.Summary.Sessions),
-			LastTask:   fmt.Sprintf("%d sessions • %d model calls", dashboard.Summary.Sessions, dashboard.Summary.ModelCalls),
-			X:          &rootX,
-			Y:          &rootY,
-			Fixed:      true,
-		},
+	keys := make([]string, 0, len(groups))
+	for key := range groups {
+		keys = append(keys, key)
 	}
-
-	links := []AITopologyLinkDTO{}
-	projectsDTO := []AITopologyProjectDTO{}
-
-	totalWorkspaces := len(workspaceMap)
-	spacingX := 620.0
-	startX := rootX
-	if totalWorkspaces > 1 {
-		startX = rootX - (float64(totalWorkspaces-1)/2.0)*spacingX
-	}
-
-	idx := 0
-	for wName, ws := range workspaceMap {
-		pX := startX + float64(idx)*spacingX
-		pY := 180.0
-		projID := "proj-codex-" + strings.ToLower(strings.ReplaceAll(wName, " ", "-"))
-
-		nodes = append(nodes, AITopologyNodeDTO{
-			ID:         projID,
-			Name:       wName,
-			Category:   0,
-			SymbolSize: 56,
-			Role:       "Project Hub",
-			Project:    wName,
-			ProjectID:  projID,
-			Status:     ws.Status,
-			Tokens:     ws.Tokens,
-			TaskCount:  ws.Sessions,
-			LastTask:   "Active workspace",
-			X:          &pX,
-			Y:          &pY,
-			Fixed:      true,
-		})
-
-		activeAgents := 0
-		if ws.Status == "ACTIVE" {
-			activeAgents = 5
+	sort.Strings(keys)
+	for _, key := range keys {
+		rows := groups[key]
+		name := rows[0].Workspace
+		id := fmt.Sprintf("proj-codex-%x", sha256.Sum256([]byte(key)))
+		var tokens int64
+		active := 0
+		for _, row := range rows {
+			tokens += row.TotalTokens
+			if row.Status == "ACTIVE" {
+				active++
+			}
 		}
-
-		projectsDTO = append(projectsDTO, AITopologyProjectDTO{
-			ID:           projID,
-			Name:         wName,
-			ActiveAgents: activeAgents,
-			TotalTasks:   ws.Sessions,
-			TotalTokens:  ws.Tokens,
-			Status:       ws.Status,
-		})
-
-		links = append(links, AITopologyLinkDTO{
-			Source:       rootID,
-			Target:       projID,
-			Label:        fmt.Sprintf("Điều phối • %s", formatCodexTokens(ws.Tokens)),
-			Tokens:       ws.Tokens,
-			Interactions: ws.Sessions,
-			Type:         "ROOT_ORCHESTRATION",
-			Status:       ws.Status,
-		})
-
-		orchID := fmt.Sprintf("orch-%s", projID)
-		orchX := pX
-		orchY := 320.0
-		nodes = append(nodes, AITopologyNodeDTO{
-			ID:         orchID,
-			Name:       fmt.Sprintf("Codex Engine (%s)", wName),
-			Category:   1,
-			SymbolSize: 48,
-			Role:       "Primary Orchestrator",
-			Project:    wName,
-			ProjectID:  projID,
-			Status:     ws.Status,
-			Tokens:     ws.Tokens,
-			TaskCount:  ws.Sessions,
-			LastTask:   "Dispatching Codex actions & model inference",
-			X:          &orchX,
-			Y:          &orchY,
-			Fixed:      true,
-		})
-
-		links = append(links, AITopologyLinkDTO{
-			Source:       projID,
-			Target:       orchID,
-			Label:        "Session Channel",
-			Tokens:       ws.Tokens,
-			Interactions: ws.Sessions,
-			Type:         "SESSION",
-			Status:       ws.Status,
-		})
-
-		toolsDef := []struct {
-			role    string
-			cat     int
-			name    string
-			offsetX float64
-			offsetY float64
-		}{
-			{"Shell Exec", 2, "Shell Terminal", -220, 140},
-			{"File Patch", 3, "File Patcher", 0, 130},
-			{"AST Analysis", 4, "Semantic Search", 120, 220},
-			{"Connectors", 5, "External Tooling", -120, 220},
-			{"Subtasks", 6, "Subtask Runner", 220, 140},
+		status := "IDLE"
+		if active > 0 {
+			status = "ACTIVE"
+			g.Nodes[0].Status = "RUNNING"
 		}
-
-		for _, td := range toolsDef {
-			subID := fmt.Sprintf("%s-%s", orchID, strings.ToLower(strings.ReplaceAll(td.name, " ", "-")))
-			subX := orchX + td.offsetX
-			subY := orchY + td.offsetY
-			nodes = append(nodes, AITopologyNodeDTO{
-				ID:         subID,
-				Name:       td.name,
-				Category:   td.cat,
-				SymbolSize: 38,
-				Role:       td.role,
-				Project:    wName,
-				ProjectID:  projID,
-				Status:     ws.Status,
-				Tokens:     ws.Tokens / 5,
-				TaskCount:  ws.Sessions * 2,
-				LastTask:   "Tool action execution",
-				X:          &subX,
-				Y:          &subY,
-				Fixed:      true,
-			})
-
-			links = append(links, AITopologyLinkDTO{
-				Source:       orchID,
-				Target:       subID,
-				Label:        fmt.Sprintf("⚡ %s", td.name),
-				Tokens:       ws.Tokens / 5,
-				Interactions: ws.Sessions,
-				Type:         "DELEGATION",
-				Status:       ws.Status,
-			})
+		g.Projects = append(g.Projects, AITopologyProjectDTO{ID: id, Name: name, TotalTokens: tokens, TotalTasks: len(rows), ActiveAgents: active, Status: status})
+		g.Nodes = append(g.Nodes, AITopologyNodeDTO{ID: id, Name: name, Category: 0, SymbolSize: 48, Project: name, ProjectID: id, Tokens: tokens, TaskCount: len(rows), Status: status, Role: "Workspace aggregate"})
+		g.Links = append(g.Links, AITopologyLinkDTO{Source: rootID, Target: id, Type: "WORKSPACE", Tokens: tokens, Interactions: len(rows), Status: status})
+		for _, row := range rows {
+			sid := "session-codex-" + row.SessionID
+			g.Nodes = append(g.Nodes, AITopologyNodeDTO{ID: sid, Name: row.Model, Category: 1, SymbolSize: 32, Project: name, ProjectID: id, Tokens: row.TotalTokens, TaskCount: int(row.Turns), Status: row.Status, Role: "Observed session", LastTask: row.SessionID})
+			g.Links = append(g.Links, AITopologyLinkDTO{Source: id, Target: sid, Type: "SESSION", Tokens: row.TotalTokens, Interactions: int(row.Turns), Status: row.Status})
 		}
-		idx++
 	}
-
-	activeSessions := int(dashboard.Summary.ActiveSessions)
-	activeConc := 0
-	if activeSessions > 0 {
-		activeConc = activeSessions
-	}
-
-	return &AITopologyGraphDTO{
-		Projects:          projectsDTO,
-		Nodes:             nodes,
-		Links:             links,
-		Categories:        categories,
-		ActiveConcurrency: activeConc,
-		ActiveSessions:    activeSessions,
-	}
+	return g
 }
 
 func formatCodexTokens(tokens int64) string {

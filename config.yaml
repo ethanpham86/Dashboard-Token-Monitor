@@ -36,7 +36,7 @@ local_tailer:
   poll_interval_seconds: 10
 
 # Giám sát OpenAI/Codex hoàn toàn thụ động từ session JSONL cục bộ.
-# Để trống sessions_dir để tự dùng ~/.codex/sessions. Collector không đọc auth.json.
+# Để trống sessions_dir để tự dùng $CODEX_HOME/sessions (mặc định ~/.codex/sessions). Collector không đọc auth.json.
 openai_monitor:
   enabled: true
   sessions_dir: ""
