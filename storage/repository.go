@@ -1433,7 +1433,7 @@ var (
 
 	reWorkspacePath    = regexp.MustCompile(`(?i)[/\\]workspace[/\\](?:code[/\\])?([a-zA-Z0-9_\-\.]+)(?:[/\\]([a-zA-Z0-9_\-\.]+))?(?:[/\\]([a-zA-Z0-9_\-\.]+))?`)
 	reFileUri          = regexp.MustCompile(`(?i)file:///[^"\s\)]*workspace[/\\](?:code[/\\])?([a-zA-Z0-9_\-\.]+)(?:[/\\]([a-zA-Z0-9_\-\.]+))?(?:[/\\]([a-zA-Z0-9_\-\.]+))?`)
-	reWorkspaceURI     = regexp.MustCompile(`(?i)([^\r\n"'>]+?)\s*->\s*([^\r\n"'>]+)`)
+	reWorkspaceURI     = regexp.MustCompile(`(?i)((?:file:///|[a-zA-Z]:[\\/])[^\r\n"'>]+?)\s*->\s*([^\r\n"'>]+)`)
 	reWorkingDir       = regexp.MustCompile(`(?i)Working directory:\s*([^\r\n]+)`)
 	reToolArgsDir      = regexp.MustCompile(`(?i)\"(?:Cwd|DirectoryPath|TargetFile|AbsolutePath|SearchDirectory|Workspace)\":\s*\"([^\"]+)\"`)
 	reFileURIUniversal = regexp.MustCompile(`(?i)file:///([^\s\"\'\)\>]+)`)
@@ -1447,7 +1447,7 @@ func isIgnoredProjectSegment(seg string) bool {
 	switch sLower {
 	case "users", "ethanpham", "appdata", "roaming", "local", "windows", "program files",
 		"googledrive", "documentfile", "workspace", "code", "projects", "mycli-ai",
-		".gemini", "gemini", "antigravity", "brain", ".system_generated", "logs", "scratch", ".agents",
+		".gemini", "gemini", "antigravity", "brain", ".system_generated", "logs", "scratch", ".agents", "agents",
 		"backup", "backups", "tmp", "temp", "profile", "profiles", "desktop", "documents", "downloads",
 		"config", "skills", "builtin", "plugins", "rules", "node_modules", "vendor",
 		"artifacts", "dist", "build", "bin", "pkg", "obj", "src", "cmd", "internal", "lib", "public", "assets", "home",
@@ -1456,6 +1456,23 @@ func isIgnoredProjectSegment(seg string) bool {
 		return true
 	}
 	if strings.HasPrefix(sLower, "n-") || strings.HasPrefix(sLower, "n.") || strings.HasPrefix(sLower, "n#") {
+		return true
+	}
+	// Bỏ qua tất cả thư mục tác tử con của teamwork / subagent
+	if strings.HasPrefix(sLower, "explorer_") || strings.HasPrefix(sLower, "orchestrator_") ||
+		strings.HasPrefix(sLower, "worker_") || strings.HasPrefix(sLower, "est_writer_") ||
+		strings.HasPrefix(sLower, "subagent_") || strings.HasPrefix(sLower, "sentinel") ||
+		strings.HasPrefix(sLower, "challenger_") {
+		return true
+	}
+	// Bỏ qua thư mục kỹ năng hoặc tên package skill
+	if strings.Contains(sLower, "skill") || strings.HasSuffix(sLower, "-main") || strings.HasSuffix(sLower, "-master") {
+		return true
+	}
+	// Bỏ qua các chuỗi comment HTML, Markdown hoặc tiêu đề bảng biểu
+	if strings.HasPrefix(sLower, "!") || strings.HasPrefix(sLower, "<!--") || strings.Contains(sLower, "--") ||
+		strings.Contains(sLower, "axes") || strings.Contains(sLower, "new folder") ||
+		strings.Contains(sLower, "<") || strings.Contains(sLower, ">") {
 		return true
 	}
 	if strings.Contains(sLower, "truncated_fields") || strings.Contains(sLower, "additional_metadata") ||
@@ -1471,7 +1488,7 @@ func isIgnoredProjectSegment(seg string) bool {
 	if matchedHex8 {
 		return true
 	}
-	exts := []string{".md", ".pdf", ".go", ".py", ".json", ".yaml", ".yml", ".txt", ".html", ".js", ".ts", ".sh", ".ps1", ".r", ".sql", ".toml", ".xml", ".css"}
+	exts := []string{".md", ".pdf", ".go", ".py", ".json", ".jsonl", ".log", ".yaml", ".yml", ".txt", ".html", ".js", ".ts", ".sh", ".ps1", ".r", ".sql", ".toml", ".xml", ".css", ".tmp", ".bak", ".map"}
 	for _, ext := range exts {
 		if strings.HasSuffix(sLower, ext) {
 			return true
@@ -1509,7 +1526,16 @@ func ExtractProjectFromPathString(raw string) (string, string) {
 		return "", ""
 	}
 
+	// Cắt bỏ phần .agents/ trở về sau vì toàn bộ file/folder dưới .agents là không gian nội bộ của subagents
+	if idx := strings.Index(rawLower, "/.agents"); idx != -1 {
+		raw = raw[:idx]
+		rawLower = rawLower[:idx]
+	}
+
 	// 1. Kiểm tra nhanh các dự án lõi nếu xuất hiện bất kỳ đâu trong đường dẫn
+	if strings.Contains(rawLower, "webdownload") || strings.Contains(rawLower, "saoke") || strings.Contains(rawLower, "skt24") {
+		return "proj-webdownloadskt24", "WebDownloadSKT24 (UI/UX Portal)"
+	}
 	if strings.Contains(rawLower, "tokenmonitor") || strings.Contains(rawLower, "token_monitor") {
 		return "proj-tokenmonitor", "TokenMonitor (GoLangDev)"
 	}
@@ -1534,8 +1560,22 @@ func ExtractProjectFromPathString(raw string) (string, string) {
 		raw = raw[2:]
 	}
 
-	// 2. Quét ngược từ thư mục lá (leaf directory) lên đầu để tự động nhận diện dự án mới bất kỳ
+	// 2. Nếu nằm trong thư mục phát triển quen thuộc (GoLangDev, ProjectR, Projects, Workspace...), lấy thư mục dự án cấp cao nhất
 	parts := strings.Split(raw, "/")
+	for i, seg := range parts {
+		sClean := strings.ToLower(strings.Trim(seg, " \t\r\n\"'`.,;:<>{}[]()#*"))
+		if (sClean == "golangdev" || sClean == "projectr" || sClean == "securitystandards" || sClean == "projects" || sClean == "workspace" || sClean == "code") && i+1 < len(parts) {
+			candidate := strings.Trim(parts[i+1], " \t\r\n\"'`.,;:<>{}[]()#*")
+			if !isIgnoredProjectSegment(candidate) {
+				id, name, _ := ResolveCrossLLMProject(candidate)
+				if id != "" && name != "" {
+					return id, name
+				}
+			}
+		}
+	}
+
+	// 3. Quét ngược từ thư mục lá (leaf directory) lên đầu để tự động nhận diện dự án mới bất kỳ
 	for i := len(parts) - 1; i >= 0; i-- {
 		seg := strings.Trim(parts[i], " \t\r\n\"'`.,;:<>{}[]()#*")
 		if !isIgnoredProjectSegment(seg) {
@@ -1556,6 +1596,9 @@ func resolveSubagentProject(subagentID, roleName, taskName string) (projID, proj
 	if strings.Contains(taskLower, "tokenmonitor") || strings.Contains(taskLower, "token_monitor") ||
 		strings.Contains(taskLower, "token monitor") || strings.Contains(taskLower, "golangdev") {
 		return "proj-tokenmonitor", "TokenMonitor (GoLangDev)"
+	}
+	if strings.Contains(taskLower, "webdownload") || strings.Contains(taskLower, "saoke") || strings.Contains(taskLower, "skt24") {
+		return "proj-webdownloadskt24", "WebDownloadSKT24 (UI/UX Portal)"
 	}
 	if strings.Contains(taskLower, "tieuchuan") || strings.Contains(taskLower, "hardening") ||
 		strings.Contains(taskLower, "cau_hinh_may_chu") || strings.Contains(taskLower, "may_chu_linux") ||
@@ -1586,6 +1629,9 @@ func resolveSubagentProject(subagentID, roleName, taskName string) (projID, proj
 		strings.HasPrefix(convPrefix, "convcons") ||
 		convPrefix == "574184f1" || convPrefix == "511bb89e" {
 		return "proj-tokenmonitor", "TokenMonitor (GoLangDev)"
+	}
+	if strings.HasPrefix(convPrefix, "webdownload") || strings.HasPrefix(convPrefix, "saoke") {
+		return "proj-webdownloadskt24", "WebDownloadSKT24 (UI/UX Portal)"
 	}
 	if strings.HasPrefix(convPrefix, "tch") || convPrefix == "227fb340" || convPrefix == "abe42560" || convPrefix == "b71cdefa" {
 		return "proj-tieuchuanhardeninglinux", "TieuChuanHardeningLinux (Security Standards)"
@@ -2438,6 +2484,8 @@ func ExtractWorkspaceFromProject(projID, projName string) string {
 	switch projID {
 	case "proj-tokenmonitor":
 		return "TokenMonitor"
+	case "proj-webdownloadskt24":
+		return "WebDownloadSKT24"
 	case "proj-mcredit":
 		return "MCREDIT"
 	case "proj-tieuchuanhardeninglinux":
@@ -2453,7 +2501,7 @@ func ExtractWorkspaceFromProject(projID, projName string) string {
 }
 
 // ResolveCrossLLMProject đồng bộ hóa các định danh dự án, đường dẫn thư mục CWD hoặc tên workspace
-// từ cả 3 nhà cung cấp Google Antigravity, OpenAI Codex và Anthropic Claude về 4 cụm dự án chuẩn.
+// từ cả 3 nhà cung cấp Google Antigravity, OpenAI Codex và Anthropic Claude về các cụm dự án chuẩn.
 func ResolveCrossLLMProject(rawPathOrName string) (id, name, workspace string) {
 	input := strings.TrimSpace(rawPathOrName)
 	norm := strings.ReplaceAll(input, `\`, `/`)
@@ -2468,6 +2516,8 @@ func ResolveCrossLLMProject(rawPathOrName string) (id, name, workspace string) {
 	switch normLower {
 	case "proj-tokenmonitor":
 		return "proj-tokenmonitor", "TokenMonitor (GoLangDev)", "GoLangDev/TokenMonitor"
+	case "proj-webdownloadskt24", "proj-saoke-downloader", "proj-saoke":
+		return "proj-webdownloadskt24", "WebDownloadSKT24 (UI/UX Portal)", "GoLangDev/WebDownloadSKT24"
 	case "proj-mcredit":
 		return "proj-mcredit", "MCREDIT (ProjectR)", "ProjectR/MCREDIT"
 	case "proj-tieuchuanhardeninglinux":
@@ -2476,14 +2526,19 @@ func ResolveCrossLLMProject(rawPathOrName string) (id, name, workspace string) {
 		return "proj-projectscriptos", "ProjectScriptOS", "ProjectScriptOS"
 	}
 
-	// 2. Cụm TokenMonitor (GoLangDev)
+	// 2. Cụm WebDownloadSKT24 (UI/UX Portal)
+	if strings.Contains(normLower, "webdownload") || strings.Contains(normLower, "saoke") || strings.Contains(normLower, "skt24") {
+		return "proj-webdownloadskt24", "WebDownloadSKT24 (UI/UX Portal)", "GoLangDev/WebDownloadSKT24"
+	}
+
+	// 3. Cụm TokenMonitor (GoLangDev)
 	if strings.Contains(normLower, "tokenmonitor") || strings.Contains(normLower, "token_monitor") ||
 		strings.Contains(normLower, "token monitor") ||
 		(strings.Contains(normLower, "golangdev") && strings.Contains(normLower, "token")) {
 		return "proj-tokenmonitor", "TokenMonitor (GoLangDev)", "GoLangDev/TokenMonitor"
 	}
 
-	// 3. Cụm MCREDIT (ProjectR) — bảo vệ với rào chắn chống va chạm TokenMonitor
+	// 4. Cụm MCREDIT (ProjectR) — bảo vệ với rào chắn chống va chạm TokenMonitor
 	if !strings.Contains(normLower, "tokenmonitor") {
 		if strings.Contains(normLower, "mcredit") || strings.Contains(normLower, "projectr") ||
 			strings.Contains(normLower, "gtcg") || strings.Contains(normLower, "t24-ds") {
@@ -2491,7 +2546,7 @@ func ResolveCrossLLMProject(rawPathOrName string) (id, name, workspace string) {
 		}
 	}
 
-	// 4. Cụm TieuChuanHardeningLinux (Security Standards) — bảo vệ với rào chắn chống va chạm TokenMonitor
+	// 5. Cụm TieuChuanHardeningLinux (Security Standards) — bảo vệ với rào chắn chống va chạm TokenMonitor
 	if !strings.Contains(normLower, "tokenmonitor") {
 		if strings.Contains(normLower, "tieuchuan") || strings.Contains(normLower, "hardening") ||
 			strings.Contains(normLower, "linuxhardening") || strings.Contains(normLower, "cau_hinh_may_chu") ||
@@ -2500,17 +2555,17 @@ func ResolveCrossLLMProject(rawPathOrName string) (id, name, workspace string) {
 		}
 	}
 
-	// 5. Cụm ProjectScriptOS
+	// 6. Cụm ProjectScriptOS
 	if strings.Contains(normLower, "projectscriptos") || strings.Contains(normLower, "aix") ||
 		strings.Contains(normLower, "scp-copyremote-file-aix") {
 		return "proj-projectscriptos", "ProjectScriptOS", "ProjectScriptOS"
 	}
 
-	// 6. Tự động nhận diện động cho các workspace phát sinh khác
+	// 7. Tự động nhận diện động cho các workspace phát sinh khác
 	cleaned := filepath.Clean(norm)
 	base := filepath.Base(cleaned)
 	base = strings.Trim(base, `"' /`)
-	if base == "" || base == "." || base == "/" {
+	if base == "" || base == "." || base == "/" || isIgnoredProjectSegment(base) {
 		base = "Workspace Chung"
 	}
 	slug := strings.ToLower(strings.ReplaceAll(base, " ", "-"))

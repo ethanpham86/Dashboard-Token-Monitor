@@ -625,9 +625,24 @@ func TestExtractProjectFromPathString_DynamicNewProjects(t *testing.T) {
 			expectedName: "TokenMonitor (GoLangDev)",
 		},
 		{
-			inputPath:    `e:\GoogleDrive\WorkSpace\Code\ProjectR\MCREDIT`,
-			expectedID:   "proj-mcredit",
-			expectedName: "MCREDIT (ProjectR)",
+			inputPath:    `e:\GoogleDrive\WorkSpace\Code\ProjectGolang\GoLangDev\WebDownloadSKT24\saoke-downloader\.agents\explorer_survey_ui\survey_report.md`,
+			expectedID:   "proj-webdownloadskt24",
+			expectedName: "WebDownloadSKT24 (UI/UX Portal)",
+		},
+		{
+			inputPath:    `e:\GoogleDrive\WorkSpace\Code\ProjectGolang\GoLangDev\WebDownloadSKT24\saoke-downloader\.agents\worker_m0_baseline\main.go`,
+			expectedID:   "proj-webdownloadskt24",
+			expectedName: "WebDownloadSKT24 (UI/UX Portal)",
+		},
+		{
+			inputPath:    `e:\GoogleDrive\WorkSpace\Code\ProjectGolang\GoLangDev\WebDownloadSKT24\ui-ux-pro-max-skill-main`,
+			expectedID:   "proj-webdownloadskt24",
+			expectedName: "WebDownloadSKT24 (UI/UX Portal)",
+		},
+		{
+			inputPath:    `e:\GoogleDrive\WorkSpace\Code\ProjectGolang\GoLangDev\WebDownloadSKT24\saoke-downloader`,
+			expectedID:   "proj-webdownloadskt24",
+			expectedName: "WebDownloadSKT24 (UI/UX Portal)",
 		},
 	}
 
