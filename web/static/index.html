@@ -4692,8 +4692,13 @@
     }
 
     function changeTopologyProject(val) {
-      userHasManuallyChosenTopologyProject = true;
-      currentTopologyProject = val;
+      if (val === 'auto') {
+        userHasManuallyChosenTopologyProject = false;
+        currentTopologyProject = 'auto';
+      } else {
+        userHasManuallyChosenTopologyProject = true;
+        currentTopologyProject = val;
+      }
       loadAgentFleetData();
     }
 
@@ -4722,7 +4727,7 @@
       });
 
       // Nếu là force hoặc không có tọa độ cụ thể
-      if (validCount < 2 || minX >= maxX || minY >= maxY) {
+      if (validCount < 2 || minX >= maxX) {
         return { zoom: 0.80, center: ['50%', '50%'] };
       }
 
@@ -4730,19 +4735,19 @@
       const midY = Math.round((minY + maxY) / 2);
 
       // Đệm an toàn hai bên (X) và trên dưới (Y) tính cả bán kính symbol + label + halo
-      const padX = 160;
-      const padY = 150;
+      const padX = 180;
+      const padY = 180;
 
       const spanW = (maxX - minX) + padX * 2;
-      const spanH = (maxY - minY) + padY * 2;
+      const spanH = Math.max(300, (maxY - minY) + padY * 2);
 
-      // Căn chỉnh để đồ thị luôn nằm gọn trong 92% chiều rộng và 84% chiều cao của khung
-      const scaleX = (w * 0.92) / spanW;
-      const scaleY = (h * 0.84) / spanH;
+      // Căn chỉnh để đồ thị luôn nằm gọn trong 90% chiều rộng và 82% chiều cao của khung
+      const scaleX = (w * 0.90) / spanW;
+      const scaleY = (h * 0.82) / spanH;
       let optZoom = Math.min(scaleX, scaleY);
 
       // Giới hạn zoom an toàn trong ngưỡng hiển thị đẹp mắt
-      optZoom = Math.min(1.4, Math.max(0.38, optZoom));
+      optZoom = Math.min(1.25, Math.max(0.42, optZoom));
       optZoom = Math.round(optZoom * 100) / 100;
 
       return { zoom: optZoom, center: [midX, midY] };
@@ -4784,6 +4789,11 @@
       localStorage.removeItem('agent_fleet_graph_zoom');
       localStorage.removeItem('agent_fleet_graph_center');
       savedGraphZoom = null;
+      if (echartAgentFleet) {
+        try {
+          echartAgentFleet.dispatchAction({ type: 'restore' });
+        } catch (e) {}
+      }
       const fit = calculateTopologyAutoFit();
       savedGraphZoom = fit.zoom;
       if (echartAgentFleet && agentFleetMode === 'topology') {
@@ -4828,9 +4838,9 @@
         currentTopologyProject = 'all';
       }
 
-      // Tự động nhận diện và ưu tiên focus vào dự án đang RUNNING / ACTIVE khi người dùng chưa chọn thủ công
-      if (!userHasManuallyChosenTopologyProject && Array.isArray(projects) && projects.length > 0) {
-        const activeProj = projects.find(p => typeof p === 'object' && (p.status === 'ACTIVE' || p.status === 'RUNNING'));
+      // Tự động nhận diện và ưu tiên focus vào dự án đang RUNNING / ACTIVE khi người dùng ở chế độ auto hoặc chưa chọn cố định
+      const activeProj = (projects || []).find(p => typeof p === 'object' && (p.status === 'ACTIVE' || p.status === 'RUNNING' || (p.active_agents && p.active_agents > 0)));
+      if (currentTopologyProject === 'auto' || !userHasManuallyChosenTopologyProject) {
         if (activeProj && activeProj.id) {
           currentTopologyProject = activeProj.id;
         }
@@ -4838,9 +4848,14 @@
 
       let current = currentTopologyProject;
       const projectExists = (projects || []).some(p => (typeof p === 'string' ? p === current : p.id === current));
-      if (current !== 'all' && current !== 'workspace_overview' && !projectExists) {
-        current = 'all';
-        currentTopologyProject = 'all';
+      if (current !== 'all' && current !== 'workspace_overview' && current !== 'auto' && !projectExists) {
+        if (activeProj && activeProj.id) {
+          current = activeProj.id;
+          currentTopologyProject = activeProj.id;
+        } else {
+          current = 'all';
+          currentTopologyProject = 'all';
+        }
       }
       const lbl = document.getElementById('lbl-topo-project-prefix');
       if (lbl) {
@@ -4850,18 +4865,21 @@
       }
       let html = '';
       if (currentAIProvider === 'codex') {
-        html = `<option value="all" ${current === 'all' ? 'selected' : ''}>🌐 Tất Cả Workspaces</option>`;
+        html = `<option value="auto" ${current === 'auto' ? 'selected' : ''}>🎯 Tự Động Focus Workspace Đang Chạy</option>`;
+        html += `<option value="all" ${current === 'all' ? 'selected' : ''}>🌐 Tất Cả Workspaces</option>`;
       } else if (currentAIProvider === 'claude') {
-        html = `<option value="all" ${current === 'all' ? 'selected' : ''}>🌐 Tất Cả Dự Án Claude</option>`;
+        html = `<option value="auto" ${current === 'auto' ? 'selected' : ''}>🎯 Tự Động Focus Dự Án Đang Chạy</option>`;
+        html += `<option value="all" ${current === 'all' ? 'selected' : ''}>🌐 Tất Cả Dự Án Claude</option>`;
       } else {
-        html = `<option value="all" ${current === 'all' ? 'selected' : ''}>🌐 Dự Án Hoạt Động (Đang Chạy / Trong 1h)</option>`;
-        html += `<option value="workspace_overview" ${current === 'workspace_overview' ? 'selected' : ''}>🌌 Sơ Đồ Toàn Cảnh Workspace (MCREDIT ↔ TieuChuanHardeningLinux ↔ TokenMonitor)</option>`;
+        html = `<option value="auto" ${current === 'auto' || (!userHasManuallyChosenTopologyProject && activeProj && current === activeProj.id) ? 'selected' : ''}>🎯 Tự Động Focus Dự Án Đang Chạy (Auto-Focus)</option>`;
+        html += `<option value="all" ${current === 'all' ? 'selected' : ''}>🌐 Tất Cả Dự Án Song Song</option>`;
+        html += `<option value="workspace_overview" ${current === 'workspace_overview' ? 'selected' : ''}>🌌 Sơ Đồ Toàn Cảnh Workspace</option>`;
       }
       (projects || []).forEach(p => {
         if (typeof p === 'string') {
           html += `<option value="${p}" ${p === current ? 'selected' : ''}>📁 ${p}</option>`;
         } else {
-          const isAct = (p.status === 'ACTIVE');
+          const isAct = (p.status === 'ACTIVE' || p.status === 'RUNNING' || (p.active_agents && p.active_agents > 0));
           const dot = isAct ? '🟢' : '⚪';
           const actTag = isAct ? ' [ĐANG CHẠY]' : '';
           html += `<option value="${p.id}" ${p.id === current ? 'selected' : ''}>${dot} ${p.name}${actTag} (${p.active_agents || 0} agents)</option>`;
@@ -4870,6 +4888,7 @@
       sel.innerHTML = html;
       sel.value = current;
     }
+
 
     function updateTopologyHUD() {
       const hud = document.getElementById('agent-topo-hud');
