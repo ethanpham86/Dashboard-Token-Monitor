@@ -1480,7 +1480,7 @@ func isIgnoredProjectSegment(seg string) bool {
 	return false
 }
 
-func extractProjectFromPathString(raw string) (string, string) {
+func ExtractProjectFromPathString(raw string) (string, string) {
 	// Xử lý escaped newlines trong JSON string
 	raw = strings.ReplaceAll(raw, `\r`, "\r")
 	raw = strings.ReplaceAll(raw, `\n`, "\n")
@@ -1510,11 +1510,10 @@ func extractProjectFromPathString(raw string) (string, string) {
 	}
 
 	// 1. Kiểm tra nhanh các dự án lõi nếu xuất hiện bất kỳ đâu trong đường dẫn
-	if strings.Contains(rawLower, "tokenmonitor") || strings.Contains(rawLower, "token_monitor") ||
-		strings.Contains(rawLower, "golangdev") {
+	if strings.Contains(rawLower, "tokenmonitor") || strings.Contains(rawLower, "token_monitor") {
 		return "proj-tokenmonitor", "TokenMonitor (GoLangDev)"
 	}
-	if strings.Contains(rawLower, "mcredit") || strings.Contains(rawLower, "projectr") || strings.Contains(rawLower, "gtcg") {
+	if strings.Contains(rawLower, "mcredit") || strings.Contains(rawLower, "gtcg") {
 		return "proj-mcredit", "MCREDIT (ProjectR)"
 	}
 	if strings.Contains(rawLower, "tieuchuan") || strings.Contains(rawLower, "hardening") || strings.Contains(rawLower, "linuxhardening") {
@@ -1535,23 +1534,13 @@ func extractProjectFromPathString(raw string) (string, string) {
 		raw = raw[2:]
 	}
 
+	// 2. Quét ngược từ thư mục lá (leaf directory) lên đầu để tự động nhận diện dự án mới bất kỳ
 	parts := strings.Split(raw, "/")
-	for i, seg := range parts {
-		clean := strings.ToLower(strings.Trim(seg, " \t\r\n\"'`.,;:<>{}[]()#*"))
-		if clean == "mylearning" && i+1 < len(parts) {
-			target := strings.Trim(parts[i+1], " \t\r\n\"'`.,;:<>{}[]()#*")
-			if !isIgnoredProjectSegment(target) {
-				id, name, _ := ResolveCrossLLMProject(target)
-				return id, name
-			}
-		}
-		if (clean == "workspace" || clean == "code" || clean == "projects") && i+1 < len(parts) {
-			target := strings.Trim(parts[i+1], " \t\r\n\"'`.,;:<>{}[]()#*")
-			if i+2 < len(parts) && (strings.EqualFold(target, "projectgolang") || strings.EqualFold(target, "golangdev") || strings.EqualFold(target, "projectr")) {
-				target = strings.Trim(parts[i+2], " \t\r\n\"'`.,;:<>{}[]()#*")
-			}
-			if !isIgnoredProjectSegment(target) {
-				id, name, _ := ResolveCrossLLMProject(target)
+	for i := len(parts) - 1; i >= 0; i-- {
+		seg := strings.Trim(parts[i], " \t\r\n\"'`.,;:<>{}[]()#*")
+		if !isIgnoredProjectSegment(seg) {
+			id, name, _ := ResolveCrossLLMProject(seg)
+			if id != "" && name != "" {
 				return id, name
 			}
 		}
@@ -1674,7 +1663,7 @@ func resolveSubagentProject(subagentID, roleName, taskName string) (projID, proj
 							}
 
 							if rawCandidate != "" {
-								pID, pName := extractProjectFromPathString(rawCandidate)
+								pID, pName := ExtractProjectFromPathString(rawCandidate)
 								if pID != "" && pName != "" {
 									f.Close()
 									convProjectMu.Lock()
@@ -1689,7 +1678,7 @@ func resolveSubagentProject(subagentID, roleName, taskName string) (projID, proj
 
 							// Ưu tiên 1: Nhận diện chuẩn xác theo đường dẫn Workspace / CWD / Thư mục thao tác thực tế
 							if strings.Contains(normLower, "/tokenmonitor") || strings.Contains(normLower, "tokenmonitor/") ||
-								strings.Contains(normLower, "golangdev/tokenmonitor") || strings.Contains(normLower, "golangdev") {
+								strings.Contains(normLower, "golangdev/tokenmonitor") {
 								f.Close()
 								convProjectMu.Lock()
 								convProjectCache[convPrefix] = struct{ ID, Name string }{ID: "proj-tokenmonitor", Name: "TokenMonitor (GoLangDev)"}

@@ -589,3 +589,56 @@ func TestAgentGanttPackets(t *testing.T) {
 		t.Errorf("Expected distinct packet types")
 	}
 }
+
+// TestExtractProjectFromPathString_DynamicNewProjects verifies that new projects created in any directory
+// (including subfolders of GoLangDev or arbitrary drives) are dynamically resolved to their own project ID and name
+// rather than being hijacked by TokenMonitor.
+func TestExtractProjectFromPathString_DynamicNewProjects(t *testing.T) {
+	testCases := []struct {
+		inputPath    string
+		expectedID   string
+		expectedName string
+	}{
+		{
+			inputPath:    `e:\GoogleDrive\WorkSpace\Code\ProjectGolang\GoLangDev\MyNewPaymentGateway`,
+			expectedID:   "proj-mynewpaymentgateway",
+			expectedName: "MyNewPaymentGateway",
+		},
+		{
+			inputPath:    `D:\Projects\EcommerceBackend`,
+			expectedID:   "proj-ecommercebackend",
+			expectedName: "EcommerceBackend",
+		},
+		{
+			inputPath:    `C:\Users\John\Desktop\AI_Research_Bot`,
+			expectedID:   "proj-ai_research_bot",
+			expectedName: "AI_Research_Bot",
+		},
+		{
+			inputPath:    `e:/WorkSpace/FintechApp`,
+			expectedID:   "proj-fintechapp",
+			expectedName: "FintechApp",
+		},
+		{
+			inputPath:    `e:\GoogleDrive\WorkSpace\Code\ProjectGolang\GoLangDev\TokenMonitor`,
+			expectedID:   "proj-tokenmonitor",
+			expectedName: "TokenMonitor (GoLangDev)",
+		},
+		{
+			inputPath:    `e:\GoogleDrive\WorkSpace\Code\ProjectR\MCREDIT`,
+			expectedID:   "proj-mcredit",
+			expectedName: "MCREDIT (ProjectR)",
+		},
+	}
+
+	for _, tc := range testCases {
+		id, name := storage.ExtractProjectFromPathString(tc.inputPath)
+		if id != tc.expectedID {
+			t.Errorf("Path %s: expected ID %q, got %q", tc.inputPath, tc.expectedID, id)
+		}
+		if name != tc.expectedName {
+			t.Errorf("Path %s: expected Name %q, got %q", tc.inputPath, tc.expectedName, name)
+		}
+	}
+}
+
