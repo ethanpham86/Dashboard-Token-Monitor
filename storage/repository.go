@@ -1433,7 +1433,7 @@ var (
 
 	reWorkspacePath    = regexp.MustCompile(`(?i)[/\\]workspace[/\\](?:code[/\\])?([a-zA-Z0-9_\-\.]+)(?:[/\\]([a-zA-Z0-9_\-\.]+))?(?:[/\\]([a-zA-Z0-9_\-\.]+))?`)
 	reFileUri          = regexp.MustCompile(`(?i)file:///[^"\s\)]*workspace[/\\](?:code[/\\])?([a-zA-Z0-9_\-\.]+)(?:[/\\]([a-zA-Z0-9_\-\.]+))?(?:[/\\]([a-zA-Z0-9_\-\.]+))?`)
-	reWorkspaceURI     = regexp.MustCompile(`(?i)([a-zA-Z]:[\\/][^\r\n"'>]+?)\s*->`)
+	reWorkspaceURI     = regexp.MustCompile(`(?i)([^\r\n"'>]+?)\s*->\s*([^\r\n"'>]+)`)
 	reWorkingDir       = regexp.MustCompile(`(?i)Working directory:\s*([^\r\n]+)`)
 	reToolArgsDir      = regexp.MustCompile(`(?i)\"(?:Cwd|DirectoryPath|TargetFile|AbsolutePath|SearchDirectory|Workspace)\":\s*\"([^\"]+)\"`)
 	reFileURIUniversal = regexp.MustCompile(`(?i)file:///([^\s\"\'\)\>]+)`)
@@ -1448,9 +1448,9 @@ func isIgnoredProjectSegment(seg string) bool {
 	case "users", "ethanpham", "appdata", "roaming", "local", "windows", "program files",
 		"googledrive", "documentfile", "workspace", "code", "projects", "mycli-ai",
 		".gemini", "gemini", "antigravity", "brain", ".system_generated", "logs", "scratch", ".agents",
-		"backup", "backups", "tmp", "temp", "profile", "profiles",
+		"backup", "backups", "tmp", "temp", "profile", "profiles", "desktop", "documents", "downloads",
 		"config", "skills", "builtin", "plugins", "rules", "node_modules", "vendor",
-		"artifacts", "dist", "build", "bin", "pkg", "obj",
+		"artifacts", "dist", "build", "bin", "pkg", "obj", "src", "cmd", "internal", "lib", "public", "assets", "home",
 		"mylearning", "projectgolang", "golangdev", "projectr", "securitystandards",
 		"user_uploaded":
 		return true
