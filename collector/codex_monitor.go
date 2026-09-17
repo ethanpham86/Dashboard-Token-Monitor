@@ -1,8 +1,6 @@
 package collector
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -12,6 +10,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -120,6 +119,8 @@ type CodexSessionDTO struct {
 }
 
 type CodexDashboardDTO struct {
+	Graph             *AITopologyGraphDTO      `json:"graph,omitempty"`
+	ScanStats         CodexScanStats           `json:"scan_stats"`
 	LastScanAt        time.Time                `json:"last_scan_at"`
 	Coverage          string                   `json:"coverage"`
 	FilesDiscovered   int                      `json:"files_discovered"`
@@ -164,6 +165,8 @@ type codexUsageAggregate struct {
 }
 
 type codexParsedSession struct {
+	stream codexStreamState
+
 	Path          string
 	Size          int64
 	ModTime       time.Time
@@ -239,6 +242,7 @@ type CodexMonitor struct {
 	files           map[string]*codexParsedSession
 	filesDiscovered int
 	lastScan        time.Time
+	scanStats       CodexScanStats
 	lastError       string
 	ctx             context.Context
 	cancel          context.CancelFunc
@@ -330,12 +334,19 @@ func (m *CodexMonitor) Stop() {
 // Refresh scans only *.jsonl files below the configured sessions directory.
 // It never traverses ~/.codex/auth.json or credential stores. Prompt/message fields pass through
 // the JSONL scanner but are never decoded into application structs, retained, or emitted.
-func (m *CodexMonitor) Refresh() error {
+func (m *CodexMonitor) Refresh() error { return m.refresh(false) }
+
+// RefreshFull verifies all monitored bytes, including edits before the saved cursor.
+func (m *CodexMonitor) RefreshFull() error { return m.refresh(true) }
+
+func (m *CodexMonitor) refresh(forceFull bool) error {
 	if !m.cfg.Enabled {
 		return nil
 	}
 	m.refreshMu.Lock()
 	defer m.refreshMu.Unlock()
+	started := time.Now()
+	stats := CodexScanStats{}
 
 	entries, err := collectCodexSessionFiles(m.sessionsDir, 0)
 	if err != nil {
@@ -360,11 +371,23 @@ func (m *CodexMonitor) Refresh() error {
 
 	next := make(map[string]*codexParsedSession, len(entries))
 	for _, entry := range entries {
-		if cached, ok := old[entry.path]; ok && cached.Size == entry.size && cached.ModTime.Equal(entry.modTime) {
+		if err := m.ctx.Err(); err != nil {
+			return err
+		}
+		if cached, ok := old[entry.path]; !forceFull && ok && cached.Size == entry.size && cached.ModTime.Equal(entry.modTime) && cached.stream.fileInfo != nil && os.SameFile(cached.stream.fileInfo, entry.info) {
 			next[entry.path] = cached
+			stats.FilesReused++
 			continue
 		}
-		parsed, parseErr := parseCodexSessionFile(entry.path, entry.size, entry.modTime)
+		cached := old[entry.path]
+		if forceFull {
+			cached = nil
+		}
+		parsed, readStats, parseErr := readCodexSession(m.ctx, entry.path, cached)
+		stats.BytesParsed += readStats.BytesParsed
+		stats.BytesVerified += readStats.BytesVerified
+		stats.FilesIncremental += readStats.FilesIncremental
+		stats.FilesFull += readStats.FilesFull
 		if parseErr != nil {
 			scanFailures++
 			if cached, ok := old[entry.path]; ok {
@@ -378,6 +401,8 @@ func (m *CodexMonitor) Refresh() error {
 	}
 
 	m.mu.Lock()
+	stats.DurationMS = float64(time.Since(started).Microseconds()) / 1000
+	m.scanStats = stats
 	m.files = next
 	m.filesDiscovered = discovered
 	m.lastScan = time.Now()
@@ -396,6 +421,7 @@ type codexFileEntry struct {
 	path    string
 	size    int64
 	modTime time.Time
+	info    os.FileInfo
 }
 
 func collectCodexSessionFiles(root string, maxFiles int) ([]codexFileEntry, error) {
@@ -425,7 +451,20 @@ func collectCodexSessionFiles(root string, maxFiles int) ([]codexFileEntry, erro
 		if !fileInfo.Mode().IsRegular() {
 			return nil
 		}
-		entries = append(entries, codexFileEntry{path: path, size: fileInfo.Size(), modTime: fileInfo.ModTime()})
+		// Windows directory entries may retain old sizes until an active writer closes.
+		// Query the handle for live size/mtime; do not read any content here.
+		if runtime.GOOS == "windows" {
+			f, openErr := os.Open(path)
+			if openErr != nil {
+				return openErr
+			}
+			fileInfo, infoErr = f.Stat()
+			f.Close()
+			if infoErr != nil {
+				return infoErr
+			}
+		}
+		entries = append(entries, codexFileEntry{path: path, size: fileInfo.Size(), modTime: fileInfo.ModTime(), info: fileInfo})
 		return nil
 	})
 	if err != nil {
@@ -443,118 +482,73 @@ func collectCodexSessionFiles(root string, maxFiles int) ([]codexFileEntry, erro
 	return entries, nil
 }
 
-func parseCodexSessionFile(path string, size int64, modTime time.Time) (*codexParsedSession, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
+func parseCodexLine(parsed *codexParsedSession, line []byte) {
+	var record codexLogRecord
+	if err := json.Unmarshal(line, &record); err != nil {
+		parsed.ParseErrors++
+		return
 	}
-	defer f.Close()
-
-	parsed := &codexParsedSession{
-		Path:    path,
-		Size:    size,
-		ModTime: modTime,
-		Model:   "OpenAI (unknown)",
+	ts := parseCodexTimestamp(record.Timestamp)
+	if ts.IsZero() {
+		ts = parsed.ModTime
 	}
-	scanner := bufio.NewScanner(f)
-	scanner.Split(func(data []byte, atEOF bool) (int, []byte, error) {
-		if atEOF && !bytes.Contains(data, []byte("\n")) && !json.Valid(bytes.TrimSpace(data)) {
-			return len(data), nil, nil
-		}
-		return bufio.ScanLines(data, atEOF)
-	})
-	scanner.Buffer(make([]byte, 64*1024), codexScannerMaxToken)
-	currentModel := parsed.Model
-	var previous CodexTokenUsage
-	seenResponses := make(map[string]bool)
-	var responseActivities, itemActivities []codexActivitySample
-	for scanner.Scan() {
-		var record codexLogRecord
-		if err := json.Unmarshal(scanner.Bytes(), &record); err != nil {
-			parsed.ParseErrors++
-			continue
-		}
-		ts := parseCodexTimestamp(record.Timestamp)
-		if ts.IsZero() {
-			ts = modTime
-		}
-		if parsed.StartedAt.IsZero() || ts.Before(parsed.StartedAt) {
-			parsed.StartedAt = ts
-		}
-		if parsed.UpdatedAt.IsZero() || ts.After(parsed.UpdatedAt) {
-			parsed.UpdatedAt = ts
-		}
+	if parsed.StartedAt.IsZero() || ts.Before(parsed.StartedAt) {
+		parsed.StartedAt = ts
+	}
+	if parsed.UpdatedAt.IsZero() || ts.After(parsed.UpdatedAt) {
+		parsed.UpdatedAt = ts
+	}
 
-		if record.Type != "session_meta" && record.Type != "turn_context" && record.Type != "token_usage_record" && record.Type != "event_msg" && record.Type != "response_item" {
-			continue
+	if record.Type != "session_meta" && record.Type != "turn_context" && record.Type != "token_usage_record" && record.Type != "event_msg" && record.Type != "response_item" {
+		return
+	}
+	var payload codexPayload
+	if len(record.Payload) > 0 && json.Unmarshal(record.Payload, &payload) != nil {
+		parsed.ParseErrors++
+		return
+	}
+	switch record.Type {
+	case "session_meta":
+		parsed.SessionID = firstNonEmpty(payload.SessionID, payload.ID, parsed.SessionID)
+		parsed.Workspace = safeWorkspaceName(payload.CWD)
+		parsed.WorkspaceID = fmt.Sprintf("%x", sha256.Sum256([]byte(payload.CWD)))
+		parsed.ModelProvider = payload.ModelProvider
+		parsed.Originator = payload.Originator
+		if metaTime := parseCodexTimestamp(payload.Timestamp); !metaTime.IsZero() {
+			parsed.StartedAt = metaTime
 		}
-		var payload codexPayload
-		if len(record.Payload) > 0 && json.Unmarshal(record.Payload, &payload) != nil {
-			parsed.ParseErrors++
-			continue
+	case "turn_context":
+		if strings.TrimSpace(payload.Model) != "" {
+			parsed.Model = strings.TrimSpace(payload.Model)
 		}
-		switch record.Type {
-		case "session_meta":
-			parsed.SessionID = firstNonEmpty(payload.SessionID, payload.ID, parsed.SessionID)
+		if parsed.Workspace == "" || parsed.Workspace == "Không rõ workspace" {
 			parsed.Workspace = safeWorkspaceName(payload.CWD)
 			parsed.WorkspaceID = fmt.Sprintf("%x", sha256.Sum256([]byte(payload.CWD)))
-			parsed.ModelProvider = payload.ModelProvider
-			parsed.Originator = payload.Originator
-			if metaTime := parseCodexTimestamp(payload.Timestamp); !metaTime.IsZero() {
-				parsed.StartedAt = metaTime
+		}
+	case "token_usage_record":
+		if payload.Usage != nil && (payload.ResponseID == "" || !parsed.stream.seenResponses[payload.ResponseID]) {
+			if payload.ResponseID != "" {
+				parsed.stream.seenResponses[payload.ResponseID] = true
 			}
-		case "turn_context":
-			if strings.TrimSpace(payload.Model) != "" {
-				currentModel = strings.TrimSpace(payload.Model)
-				parsed.Model = currentModel
-			}
-			if parsed.Workspace == "" {
-				parsed.Workspace = safeWorkspaceName(payload.CWD)
-			}
-		case "token_usage_record":
-			if payload.Usage != nil && (payload.ResponseID == "" || !seenResponses[payload.ResponseID]) {
-				if payload.ResponseID != "" {
-					seenResponses[payload.ResponseID] = true
-				}
-				if payload.ThreadTokenUsage != nil {
-					appendCodexCumulative(parsed, *payload.ThreadTokenUsage, &previous, ts, currentModel)
-				} else {
-					parsed.Usage = append(parsed.Usage, codexUsageSample{Timestamp: ts, Model: currentModel, Usage: *payload.Usage})
-					addCodexCounters(&previous, *payload.Usage)
-				}
-			}
-		case "response_item":
-			if payload.Type == "function_call" || payload.Type == "custom_tool_call" || payload.Type == "local_shell_call" {
-				responseActivities = append(responseActivities, codexActivitySample{Timestamp: ts, Kind: "tool"})
-			}
-		case "event_msg":
-			before := len(parsed.Activities)
-			parseCodexEvent(parsed, payload, ts, currentModel, &previous)
-			if payload.Type == "item_completed" && len(parsed.Activities) > before && parsed.Activities[len(parsed.Activities)-1].Kind == "tool" {
-				itemActivities = append(itemActivities, parsed.Activities[len(parsed.Activities)-1])
-				parsed.Activities = parsed.Activities[:before]
+			if payload.ThreadTokenUsage != nil {
+				appendCodexCumulative(parsed, *payload.ThreadTokenUsage, &parsed.stream.previous, ts, parsed.Model)
+			} else {
+				parsed.Usage = append(parsed.Usage, codexUsageSample{Timestamp: ts, Model: parsed.Model, Usage: *payload.Usage})
+				addCodexCounters(&parsed.stream.previous, *payload.Usage)
 			}
 		}
+	case "response_item":
+		if payload.Type == "function_call" || payload.Type == "custom_tool_call" || payload.Type == "local_shell_call" {
+			parsed.stream.responseActivities = append(parsed.stream.responseActivities, codexActivitySample{Timestamp: ts, Kind: "tool"})
+		}
+	case "event_msg":
+		before := len(parsed.Activities)
+		parseCodexEvent(parsed, payload, ts, parsed.Model, &parsed.stream.previous)
+		if payload.Type == "item_completed" && len(parsed.Activities) > before && parsed.Activities[len(parsed.Activities)-1].Kind == "tool" {
+			parsed.stream.itemActivities = append(parsed.stream.itemActivities, parsed.Activities[len(parsed.Activities)-1])
+			parsed.Activities = parsed.Activities[:before]
+		}
 	}
-	// Rollouts expose tool invocations separately; opaque outputs do not establish success.
-	if len(responseActivities) > 0 {
-		parsed.Activities = append(parsed.Activities, responseActivities...)
-	} else {
-		parsed.Activities = append(parsed.Activities, itemActivities...)
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, err
-	}
-	if parsed.SessionID == "" {
-		parsed.SessionID = sessionIDFromFilename(path)
-	}
-	if parsed.Workspace == "" {
-		parsed.Workspace = "Không rõ workspace"
-	}
-	if parsed.UpdatedAt.IsZero() {
-		parsed.UpdatedAt = modTime
-	}
-	return parsed, nil
 }
 
 func parseCodexEvent(parsed *codexParsedSession, payload codexPayload, ts time.Time, currentModel string, previous *CodexTokenUsage) {
@@ -698,6 +692,20 @@ func (m *CodexMonitor) Dashboard(timeRange string) CodexDashboardDTO {
 	return m.dashboard(timeRange, true)
 }
 
+// Snapshot derives the graph and dashboard from one immutable set of session data.
+func (m *CodexMonitor) Snapshot(timeRange string, includeGraph bool) CodexDashboardDTO {
+	if !includeGraph {
+		return m.Dashboard(timeRange)
+	}
+	d := m.dashboard(timeRange, false)
+	d.Graph = codexGraphFromDashboard(d)
+	if m.cfg.MaxSessionRows > 0 && len(d.Sessions) > m.cfg.MaxSessionRows {
+		d.SessionsTruncated = true
+		d.Sessions = d.Sessions[:m.cfg.MaxSessionRows]
+	}
+	return d
+}
+
 // DashboardForAggregation returns every monitored session, without the UI row limit.
 func (m *CodexMonitor) DashboardForAggregation(timeRange string) CodexDashboardDTO {
 	return m.dashboard(timeRange, false)
@@ -716,12 +724,14 @@ func (m *CodexMonitor) dashboard(timeRange string, limitRows bool) CodexDashboar
 	lastScan := m.lastScan
 	lastError := m.lastError
 	discovered := m.filesDiscovered
+	stats := m.scanStats
 	m.mu.RUnlock()
 
 	now := time.Now()
 	cutoff := codexRangeCutoff(now, timeRange)
 	result := CodexDashboardDTO{
 		LastScanAt:      lastScan,
+		ScanStats:       stats,
 		Coverage:        "LOCAL_SESSION_LOGS_ONLY_NOT_ACCOUNT_USAGE",
 		FilesDiscovered: discovered,
 		FilesTruncated:  m.cfg.MaxFiles > 0 && discovered > m.cfg.MaxFiles,
@@ -928,8 +938,18 @@ func (m *CodexMonitor) dashboard(timeRange string, limitRows bool) CodexDashboar
 		}
 		result.Models = append(result.Models, CodexModelDTO{ModelName: name, TotalTokens: a.TotalTokens, ModelCalls: a.Calls, TokenPct: pct})
 	}
-	sort.Slice(result.Models, func(i, j int) bool { return result.Models[i].TotalTokens > result.Models[j].TotalTokens })
-	sort.Slice(result.Sessions, func(i, j int) bool { return result.Sessions[i].UpdatedAt.After(result.Sessions[j].UpdatedAt) })
+	sort.Slice(result.Models, func(i, j int) bool {
+		if result.Models[i].TotalTokens == result.Models[j].TotalTokens {
+			return result.Models[i].ModelName < result.Models[j].ModelName
+		}
+		return result.Models[i].TotalTokens > result.Models[j].TotalTokens
+	})
+	sort.Slice(result.Sessions, func(i, j int) bool {
+		if result.Sessions[i].UpdatedAt.Equal(result.Sessions[j].UpdatedAt) {
+			return result.Sessions[i].SessionID < result.Sessions[j].SessionID
+		}
+		return result.Sessions[i].UpdatedAt.After(result.Sessions[j].UpdatedAt)
+	})
 	if limitRows && m.cfg.MaxSessionRows > 0 && len(result.Sessions) > m.cfg.MaxSessionRows {
 		result.SessionsTruncated = true
 		result.Sessions = result.Sessions[:m.cfg.MaxSessionRows]
@@ -982,7 +1002,10 @@ func codexBucketKey(ts time.Time, timeRange string) string {
 
 // Graph contains observed workspaces and sessions only. ACTIVE means recent log activity.
 func (m *CodexMonitor) Graph(timeRange string) *AITopologyGraphDTO {
-	d := m.dashboard(timeRange, false)
+	return codexGraphFromDashboard(m.dashboard(timeRange, false))
+}
+
+func codexGraphFromDashboard(d CodexDashboardDTO) *AITopologyGraphDTO {
 	g := &AITopologyGraphDTO{Projects: []AITopologyProjectDTO{}, Nodes: []AITopologyNodeDTO{}, Links: []AITopologyLinkDTO{}, Categories: []AITopologyCategoryDTO{{Name: "Workspaces"}, {Name: "Codex sessions"}, {Name: ""}, {Name: ""}, {Name: ""}, {Name: ""}, {Name: ""}, {Name: "Local logs"}}, ActiveConcurrency: int(d.Summary.ActiveSessions), ActiveSessions: int(d.Summary.ActiveSessions)}
 	if len(d.Sessions) == 0 {
 		return g

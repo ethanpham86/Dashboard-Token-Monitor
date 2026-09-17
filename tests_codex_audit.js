@@ -49,3 +49,30 @@ assert.equal(ctx.chartInstance.config.data.datasets[0].label,'model-a');
 assert.equal(ctx.chartInstance.config.data.datasets[0].data[0],100);
 assert.equal(ctx.chartInstance.config.data.datasets[1].data[0],30);
 console.log('Codex UI audit: syntax, unknown/stale metadata, token stacks and model attribution passed.');
+
+async function checkCodexRequests() {
+  const requests = [];
+  ctx.currentTimeRange = 'all'; ctx.currentMainView = 'overview';
+  ctx.AbortController = AbortController;
+  ctx.console = {error() {}};
+  ctx.fetch = (url, options) => new Promise(resolve => requests.push({url, options, resolve}));
+  for (const name of ['renderChart','renderEChartsDonut','renderModelChips','updateModelDropdown','renderEChartsTimeline','renderProviderDailyTable','renderOpenAILimit','renderOpenAISessions','loadAgentFleetData']) ctx[name] = () => {};
+  vm.runInContext(extract('    let codexRequest = null;', '    async function refreshOpenAIData('), ctx);
+  const old = ctx.loadOpenAIData();
+  assert.equal(ctx.loadOpenAIData(), old, 'overlapping polls should share one request');
+  assert.equal(requests.length, 1);
+  ctx.currentTimeRange = '7d'; ctx.currentMainView = 'agents';
+  const current = ctx.loadOpenAIData();
+  assert.equal(requests[0].options.signal.aborted, true);
+  assert.match(requests[1].url, /range=7d&include_graph=1/);
+  requests[1].resolve({ok:true,json:async()=>({summary:{total_tokens:77}, sessions:[], models:[], time_series:[], model_time_series:[]})});
+  await current;
+  requests[0].resolve({ok:true,json:async()=>({summary:{total_tokens:999}})});
+  await old;
+  assert.equal(elements.get('num-grand-tokens').textContent,'77','late response overwrote the selected range');
+  ctx.currentTimeRange = '24h';
+  const offline=ctx.loadOpenAIData(); requests[2].resolve({ok:false,status:503}); await offline;
+  assert.match(elements.get('txt-plan-badge').textContent,/OFFLINE/);
+  console.log('Codex requests: coalescing, cancellation, bundled graph, stale response and failure state passed.');
+}
+checkCodexRequests().catch(error => { console.error(error); process.exitCode=1; });

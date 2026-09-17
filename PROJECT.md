@@ -66,6 +66,7 @@ The system consists of:
 | 48 | F48-Interactive-Topology-Engine-Skill-Norm | Standardize `interactive_topology_engine` skill with 5 golden rules (both global and workspace) | M15 | User Requirement R1 |
 | 49 | F49-Doc-Sync-Master-Portal-Git | 100% Code-to-Doc synchronization across all technical documents, recompile Master Offline Portal `docs/index.html` (zero CORS), full test suite PASS, Git synchronization excluding skills | M15 | User Requirement R2, R3, R4 |
 | 50 | F50-Codex-Monitor-Audit-Optimization | Bóc tách chính xác usage Codex: khử đếm trùng baseline delta, xử lý compaction/reset, phân rã stacked token, gán model theo turn_context, cô lập hash path workspace, loại bỏ công cụ giả lập và bảo vệ quyền riêng tư credential | M16 | User Request Audit |
+| 51 | F51-Codex-Incremental-Stream-Coalescing | Thuật toán quét luồng gia tăng (incremental boundary hash scan), request coalescing, hủy bỏ request thừa qua AbortController, snapshot tích hợp đồ thị include_graph=1 và cache-control no-store | M16 | Performance & Stream Optimization |
 
 ## Milestones
 | # | Name | Scope | Dependencies | Status |

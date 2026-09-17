@@ -2873,6 +2873,7 @@
     }
 
     function switchAIProvider(provider) {
+      if (provider !== "codex") { codexRequest?.controller.abort(); codexRequest = null; }
       if (!['cross', 'agy', 'codex', 'claude'].includes(provider)) {
         provider = 'cross';
       }
@@ -5117,6 +5118,12 @@
           renderAgentFleetChart();
           return;
         } else if (currentAIProvider === 'codex') {
+          const bundled = cachedCodexRange === (currentTimeRange || '30d') && cachedCodexDashboard?.graph;
+          if (bundled) {
+            cachedFleetGraph = bundled;
+            updateTopologyProjectSelect(bundled.projects);
+            updateTopologyHUD();
+          } else {
           const resGraph = await fetch('/api/openai/graph?range=' + rangeParam);
           if (fetchSeq !== _fleetFetchSeq || currentAIProvider !== targetProvider) return;
           if (resGraph.ok) {
@@ -5128,6 +5135,7 @@
             cachedFleetGraph = { nodes: [], links: [], projects: [], categories: [] };
             updateTopologyProjectSelect([]);
             updateTopologyHUD();
+          }
           }
           const nodeCount = cachedFleetGraph?.nodes?.length || 0;
           const activeSessions = (cachedFleetGraph && typeof cachedFleetGraph.active_concurrency !== 'undefined')
@@ -6524,13 +6532,33 @@
       }
     }
 
-    async function loadOpenAIData() {
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden && currentAIProvider === 'codex') loadOpenAIData();
+    });
+    let codexRequest = null;
+    let cachedCodexRange = null;
+    function loadOpenAIData() {
+      const range = currentTimeRange || '30d';
+      const includeGraph = currentMainView === 'agents' || currentMainView === 'all';
+      const key = `${range}:${includeGraph}`;
+      if (codexRequest?.key === key) return codexRequest.promise;
+      codexRequest?.controller.abort();
+      const request = {range, includeGraph, key, controller:new AbortController()};
+      codexRequest = request;
+      request.promise = fetchOpenAIData(request).finally(() => {
+        if (codexRequest === request) codexRequest = null;
+      });
+      return request.promise;
+    }
+
+    async function fetchOpenAIData(request) {
       try {
-        const response = await fetch('/api/openai/dashboard?range=' + encodeURIComponent(currentTimeRange));
+        const response = await fetch('/api/openai/dashboard?range=' + encodeURIComponent(request.range) + (request.includeGraph ? '&include_graph=1' : ''), {signal:request.controller.signal});
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
-        if (currentAIProvider !== "codex") return;
+        if (codexRequest !== request || currentAIProvider !== "codex" || (currentTimeRange || "30d") !== request.range) return;
         cachedCodexDashboard = data;
+        cachedCodexRange = request.range;
         const s = data.summary || {};
         const rate = data.rate_limits || null;
 
@@ -6619,8 +6647,6 @@
         renderModelChips(cachedModelList);
         updateModelDropdown(cachedModelList);
 
-        const modelTs = (data.model_time_series || []).map(p => ({...p, prompt_tokens: p.input_tokens || 0, call_count: p.model_calls || 0}));
-        cachedModelTimeSeries = modelTs;
         renderEChartsTimeline();
 
         // 5. Cập nhật Bảng Granular Daily History Table
@@ -6642,6 +6668,9 @@
         }
 
       } catch (err) {
+        if (err.name === 'AbortError' || codexRequest !== request || currentAIProvider !== 'codex') return;
+        setOpenAIText('codex-source-note', 'Không tải được dữ liệu Codex. Số liệu đang hiển thị có thể đã cũ.');
+        setOpenAIText('txt-plan-badge', 'LOCAL LOG · OFFLINE');
         console.error('Lỗi nạp OpenAI/Codex dashboard:', err);
       }
     }
@@ -6653,7 +6682,12 @@
       try {
         const response = await fetch('/api/openai/refresh', {method:'POST'});
         if (!response.ok) throw new Error(`Codex refresh HTTP ${response.status}`);
+        codexRequest?.controller.abort();
+        codexRequest = null;
         await loadOpenAIData();
+      } catch (err) {
+        setOpenAIText("codex-source-note", "Không thể quét lại đầy đủ log Codex. Kiểm tra đường dẫn và quyền đọc.");
+        console.error("Codex refresh failed:", err);
       } finally {
         if (btn) { btn.disabled = false; btn.textContent = old || '↻ Quét Codex Logs'; }
       }
@@ -8003,7 +8037,7 @@
         loadCrossLLMData();
       } else if (currentAIProvider === 'claude') {
         loadClaudeData();
-      } else if (currentAIProvider === 'codex') {
+      } else if (currentAIProvider === 'codex' && !document.hidden) {
         loadOpenAIData();
       } else {
         loadDashboard();

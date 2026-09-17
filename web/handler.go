@@ -94,12 +94,28 @@ func (s *Server) Routes() http.Handler {
 	return mux
 }
 
+func codexRequestRange(w http.ResponseWriter, r *http.Request) (string, bool) {
+	value := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("range")))
+	switch value {
+	case "", "month":
+		return "30d", true
+	case "1d":
+		return "24h", true
+	case "today", "24h", "7d", "30d", "all":
+		return value, true
+	default:
+		http.Error(w, "Invalid Codex range", http.StatusBadRequest)
+		return "", false
+	}
+}
+
 func (s *Server) handleOpenAIDashboard(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
 	if s.codexMonitor == nil {
 		_ = json.NewEncoder(w).Encode(collector.CodexDashboardDTO{
 			GeneratedAt: time.Now(), SourceStatus: "DISABLED",
@@ -109,11 +125,11 @@ func (s *Server) handleOpenAIDashboard(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	timeRange := r.URL.Query().Get("range")
-	if timeRange == "" {
-		timeRange = "30d"
+	timeRange, ok := codexRequestRange(w, r)
+	if !ok {
+		return
 	}
-	_ = json.NewEncoder(w).Encode(s.codexMonitor.Dashboard(timeRange))
+	_ = json.NewEncoder(w).Encode(s.codexMonitor.Snapshot(timeRange, r.URL.Query().Get("include_graph") == "1"))
 }
 
 func (s *Server) handleOpenAIRefresh(w http.ResponseWriter, r *http.Request) {
@@ -125,17 +141,26 @@ func (s *Server) handleOpenAIRefresh(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "OpenAI/Codex monitor is disabled", http.StatusServiceUnavailable)
 		return
 	}
-	if err := s.codexMonitor.Refresh(); err != nil {
+	if err := s.codexMonitor.RefreshFull(); err != nil {
 		http.Error(w, "Không thể quét đầy đủ log Codex; kiểm tra cấu hình và quyền đọc.", http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{"message": "Đã quét lại log Codex cục bộ", "status": "READY"})
+	w.Header().Set("Cache-Control", "no-store")
+	_ = json.NewEncoder(w).Encode(map[string]any{"message": "Đã quét lại log Codex cục bộ", "status": s.codexMonitor.Dashboard("all").SourceStatus})
 }
 
 func (s *Server) handleOpenAIGraph(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
-	timeRange := r.URL.Query().Get("range")
+	w.Header().Set("Cache-Control", "no-store")
+	timeRange, ok := codexRequestRange(w, r)
+	if !ok {
+		return
+	}
 	if s.codexMonitor == nil {
 		_ = json.NewEncoder(w).Encode(map[string]any{"projects": []any{}, "nodes": []any{}, "links": []any{}, "categories": []any{}})
 		return
