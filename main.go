@@ -20,7 +20,33 @@ import (
 
 func main() {
 	configPath := flag.String("config", "config.yaml", "Đường dẫn tới file cấu hình YAML")
+	// -service install   → đăng ký Windows Service (chạy với quyền Admin)
+	// -service uninstall → gỡ bỏ Windows Service
+	// (bỏ trống)         → chạy bình thường như console app
+	serviceCmd := flag.String("service", "", "Lệnh quản lý Windows Service: install | uninstall")
 	flag.Parse()
+
+	// ── Xử lý lệnh install / uninstall ──────────────────────────────────────
+	switch *serviceCmd {
+	case "install":
+		// Cần đường dẫn tuyệt đối để SCM khởi động đúng config
+		absConfig := *configPath
+		if !strings.HasPrefix(absConfig, string(os.PathSeparator)) && len(absConfig) > 1 && absConfig[1] != ':' {
+			if exe, err := os.Executable(); err == nil {
+				absConfig = strings.TrimSuffix(exe, "token_monitor.exe") + *configPath
+			}
+		}
+		if err := installService(absConfig); err != nil {
+			log.Fatalf("[FATAL] Không thể cài đặt service: %v", err)
+		}
+		return
+	case "uninstall":
+		if err := uninstallService(); err != nil {
+			log.Fatalf("[FATAL] Không thể gỡ service: %v", err)
+		}
+		return
+	}
+
 
 	log.Println("==================================================================")
 	log.Println("  🚀 KHỞI ĐỘNG TOKENMONITOR - OBSERVABILITY & FINOPS DAEMON")
@@ -182,11 +208,27 @@ func main() {
 		}
 	}()
 
-	// 7. Lắng nghe tín hiệu OS để Graceful Shutdown
+	// 7. Lắng nghe tín hiệu dừng — hỗ trợ cả Windows Service (SCM) và console (Ctrl+C)
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	sig := <-quit
-	log.Printf("[INFO] Nhận tín hiệu dừng (%s), đang thực hiện Graceful Shutdown...", sig)
+
+	// Khi chạy dưới Windows SCM, nhận stop signal từ SCM thay vì OS signal
+	if isWindowsService() {
+		log.Println("[INFO] 🪟 Chạy dưới dạng Windows Service — chờ lệnh Stop từ SCM...")
+		svcStopCh, err := runAsWindowsService()
+		if err != nil {
+			log.Fatalf("[FATAL] Không thể khởi động Windows Service handler: %v", err)
+		}
+		select {
+		case <-svcStopCh:
+			log.Println("[INFO] Nhận lệnh Stop từ Windows SCM, đang Graceful Shutdown...")
+		case sig := <-quit:
+			log.Printf("[INFO] Nhận tín hiệu OS (%s), đang Graceful Shutdown...", sig)
+		}
+	} else {
+		sig := <-quit
+		log.Printf("[INFO] Nhận tín hiệu dừng (%s), đang thực hiện Graceful Shutdown...", sig)
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
