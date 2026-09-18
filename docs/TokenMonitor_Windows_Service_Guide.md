@@ -1,205 +1,270 @@
-# TokenMonitor — Hướng Dẫn Cấu Hình Windows Service
+# TokenMonitor — Hướng Dẫn Chạy Dưới Dạng Windows Service
 
-> **Phiên bản**: 1.0 — Cập nhật: 2026-09-18
+> **Phiên bản**: 2.0 — Cập nhật: 2026-09-18
 > **Tác giả**: Pham Ethan
-> **Mục tiêu**: Cấu hình `token_monitor.exe` chạy nền (Background Service) trên Windows, tự khởi động cùng hệ điều hành, hiển thị trong tab **Services** của Task Manager.
+> **Mục tiêu**: Chạy `token_monitor.exe` như một Windows Service chính thức — tự động bật cùng máy tính, ẩn hoàn toàn cửa sổ đen (console), hiển thị trong tab **Services** của Task Manager, không cần cài thêm bất kỳ phần mềm nào.
 
 ---
 
 ## Mục Lục
 
-- [1. Tổng Quan & Yêu Cầu Tiên Quyết](#1-tổng-quan--yêu-cầu-tiên-quyết)
-- [2. Phương Án 1: NSSM (Khuyên Dùng)](#2-phương-án-1-nssm-khuyên-dùng)
-  - [2.1. Cài đặt NSSM](#21-cài-đặt-nssm)
-  - [2.2. Đăng ký Service](#22-đăng-ký-service)
-  - [2.3. Khởi động & Kiểm tra](#23-khởi-động--kiểm-tra)
-  - [2.4. Các lệnh quản trị hàng ngày](#24-các-lệnh-quản-trị-hàng-ngày)
-- [3. Phương Án 2: Windows Task Scheduler (Native)](#3-phương-án-2-windows-task-scheduler-native)
-  - [3.1. Cấu hình bằng PowerShell](#31-cấu-hình-bằng-powershell)
-  - [3.2. Cấu hình bằng giao diện GUI](#32-cấu-hình-bằng-giao-diện-gui)
-- [4. Nghiệm Thu & Xác Nhận](#4-nghiệm-thu--xác-nhận)
-- [5. Xử Lý Sự Cố](#5-xử-lý-sự-cố)
-- [6. Cập Nhật Phiên Bản Mới](#6-cập-nhật-phiên-bản-mới)
+- [1. Tổng Quan](#1-tổng-quan)
+- [2. Phương Án 1: Native Windows Service (Khuyên Dùng — Không Cần Cài Gì)](#2-phương-án-1-native-windows-service-khuyên-dùng--không-cần-cài-gì)
+  - [2.1. Nguyên lý hoạt động](#21-nguyên-lý-hoạt-động)
+  - [2.2. Cài đặt & Đăng ký Service](#22-cài-đặt--đăng-ký-service)
+  - [2.3. Quản lý Service hàng ngày](#23-quản-lý-service-hàng-ngày)
+  - [2.4. Cập nhật phiên bản mới](#24-cập-nhật-phiên-bản-mới)
+  - [2.5. Gỡ bỏ Service](#25-gỡ-bỏ-service)
+- [3. Phương Án 2: NSSM (Service Wrapper)](#3-phương-án-2-nssm-service-wrapper)
+- [4. Phương Án 3: Windows Task Scheduler (100% Native, không vào tab Services)](#4-phương-án-3-windows-task-scheduler-100-native-không-vào-tab-services)
+- [5. Nghiệm Thu & Xác Nhận](#5-nghiệm-thu--xác-nhận)
+- [6. Xử Lý Sự Cố](#6-xử-lý-sự-cố)
+- [7. So Sánh Ba Phương Án](#7-so-sánh-ba-phương-án)
 
 ---
 
-## 1. Tổng Quan & Yêu Cầu Tiên Quyết
+## 1. Tổng Quan
 
 ### Tại sao cần chạy dưới dạng Service?
 
-| Tiêu chí | Chạy thủ công (Terminal) | Chạy dạng Service |
-| :--- | :--- | :--- |
-| Tự khởi động cùng Windows | ❌ Phải mở terminal mỗi lần | ✅ Tự động 100% |
-| Hiển thị trong Task Manager → Services | ❌ Không | ✅ Có (NSSM) |
-| Tự restart khi crash | ❌ Phải theo dõi thủ công | ✅ Tự động sau 5 giây |
-| Ghi log ra file riêng | ❌ Mất khi đóng terminal | ✅ Ghi vào `logs/` |
-| Ẩn cửa sổ đen (Console) | ❌ Luôn hiện | ✅ Chạy hoàn toàn nền |
+| Tiêu chí | Chạy thủ công (double-click / terminal) | Chạy dạng Service |
+|:---|:---|:---|
+| Tự bật cùng Windows | ❌ Phải mở tay mỗi lần | ✅ Tự động 100% |
+| Ẩn cửa sổ đen (console) | ❌ Luôn hiện cửa sổ đen | ✅ Chạy hoàn toàn nền |
+| Hiển thị trong tab Services | ❌ Không | ✅ Có |
+| Tự restart khi crash | ❌ Phải theo dõi thủ công | ✅ Tự động |
+| Graceful shutdown an toàn | ✅ Ctrl+C | ✅ Stop từ Task Manager |
 
-### Yêu cầu hệ thống
+### Yêu cầu
 
-- **OS**: Windows 10 / 11 / Server 2019+
-- **Quyền**: Phải chạy PowerShell với **Run as Administrator**
+- **OS**: Windows 10 / 11 / Windows Server 2019+
+- **Quyền**: Phải mở PowerShell bằng **Run as Administrator**
 - **File nhị phân**: `token_monitor.exe` đã biên dịch thành công
 - **File cấu hình**: `config.yaml` nằm cùng thư mục gốc dự án
 
-### Cấu trúc thư mục quan trọng
+### Cấu trúc thư mục
 
 ```
 E:\GoogleDrive\WorkSpace\Code\ProjectGolang\GoLangDev\TokenMonitor\
-├── token_monitor.exe          ← File nhị phân chính
-├── config.yaml                ← File cấu hình
+├── token_monitor.exe       ← File nhị phân chính (đã tích hợp Windows Service)
+├── config.yaml             ← File cấu hình
 ├── data\
-│   └── token_monitor.db       ← Cơ sở dữ liệu SQLite (WAL mode)
-└── logs\                      ← Thư mục log service (tạo mới)
-    ├── service.log            ← Log stdout
-    └── service_err.log        ← Log stderr
+│   └── token_monitor.db    ← SQLite database (WAL mode)
+└── logs\                   ← (Tùy chọn) Thư mục log
 ```
-
-> **⚠️ LƯU Ý QUAN TRỌNG**: Không thể dùng `sc.exe create` trực tiếp cho file Go console app. Windows SCM yêu cầu service phải phản hồi bắt tay `SERVICE_RUNNING` — file `token_monitor.exe` là ứng dụng console nên sẽ gặp lỗi **Error 1053** nếu đăng ký trực tiếp. Phải dùng **NSSM** (Service Wrapper) hoặc **Task Scheduler**.
 
 ---
 
-## 2. Phương Án 1: NSSM (Khuyên Dùng)
+## 2. Phương Án 1: Native Windows Service (Khuyên Dùng — Không Cần Cài Gì)
 
-**NSSM** (*Non-Sucking Service Manager*) là công cụ tiêu chuẩn công nghiệp để bọc bất kỳ ứng dụng console nào (Go, Node.js, Python, Java...) thành Windows Service chính thức.
+Đây là phương án tốt nhất. `token_monitor.exe` đã được tích hợp sẵn giao thức giao tiếp Windows SCM (*Service Control Manager*) thông qua thư viện `golang.org/x/sys/windows/svc`. Không cần cài thêm bất kỳ phần mềm nào.
 
-- **Trang chủ**: [nssm.cc](https://nssm.cc)
-- **Giấy phép**: Public Domain (Miễn phí hoàn toàn)
+### 2.1. Nguyên lý hoạt động
 
-### 2.1. Cài đặt NSSM
+```
+token_monitor.exe -service install
+       │
+       ▼
+Windows SCM ◄──────────────────────────────────────────────┐
+(Services)                                                  │
+       │ sc start TokenMonitor                              │
+       ▼                                                    │
+token_monitor.exe ←──── bắt tay SERVICE_RUNNING ────────────┘
+   (chạy nền)
+       │
+       ├── LocalTailer (quét transcript Antigravity)
+       ├── CodexMonitor (quét session OpenAI)
+       ├── ClaudeMonitor (quét session Claude)
+       └── Web Dashboard :9090
 
-Mở **PowerShell (Run as Administrator)**, chọn 1 trong 2 cách:
+Task Manager → tab Services → TokenMonitor [Running]
+```
 
-**Cách 1 — Qua Winget (Nhanh nhất):**
+Khi SCM gửi lệnh Stop (từ chuột phải trong Task Manager hoặc `sc stop`), `token_monitor.exe` thực hiện **Graceful Shutdown** — lưu dữ liệu, đóng database an toàn, backup cuối cùng — trước khi thoát.
+
+### 2.2. Cài đặt & Đăng ký Service
+
+> ⚠️ **Phải mở PowerShell bằng Run as Administrator**
+
+```powershell
+# Bước 1: Vào thư mục dự án
+cd "E:\GoogleDrive\WorkSpace\Code\ProjectGolang\GoLangDev\TokenMonitor"
+
+# Bước 2: Đăng ký TokenMonitor thành Windows Service (chỉ làm 1 lần duy nhất)
+.\token_monitor.exe -service install
+```
+
+Kết quả thành công:
+```
+[INFO] ✅ Service "TokenMonitor" đã được đăng ký thành công
+[INFO] Chạy lệnh sau để bật service:
+[INFO]   sc start TokenMonitor
+```
+
+```powershell
+# Bước 3: Khởi động service
+sc.exe start TokenMonitor
+
+# Bước 4: Xác nhận đang chạy
+sc.exe query TokenMonitor
+```
+
+Kết quả mong đợi:
+```
+SERVICE_NAME: TokenMonitor
+        TYPE               : 10  WIN32_OWN_PROCESS
+        STATE              : 4  RUNNING
+        WIN32_EXIT_CODE    : 0
+        WAIT_HINT          : 0x0
+```
+
+**Kiểm tra trực quan**: Mở Task Manager → tab **Services** → thấy dòng `TokenMonitor` với trạng thái **Running**. Không có cửa sổ đen nào xuất hiện.
+
+#### Cấu hình Service trong Registry (tự động — không cần làm thêm gì)
+
+Lệnh `-service install` tự động ghi vào Registry:
+
+| Tham số | Giá trị |
+|:---|:---|
+| **Tên service** | `TokenMonitor` |
+| **Tên hiển thị** | `TokenMonitor Daemon` |
+| **Mô tả** | `TokenMonitor - AI Agent Observability & FinOps Dashboard (Port 9090)` |
+| **Kiểu khởi động** | `Automatic` (tự bật cùng Windows) |
+| **File thực thi** | Đường dẫn tuyệt đối đến `token_monitor.exe` |
+| **Tham số** | `-config <đường dẫn tuyệt đối đến config.yaml>` |
+
+### 2.3. Quản lý Service hàng ngày
+
+#### Bằng lệnh PowerShell (không cần Administrator)
+
+| Thao tác | Lệnh |
+|:---|:---|
+| **Khởi động** | `sc.exe start TokenMonitor` |
+| **Tạm dừng** | `sc.exe stop TokenMonitor` |
+| **Kiểm tra trạng thái** | `sc.exe query TokenMonitor` |
+| **Xem chi tiết cấu hình** | `sc.exe qc TokenMonitor` |
+
+#### Bằng chuột (Task Manager)
+
+1. Mở **Task Manager** → tab **Services**
+2. Tìm dòng `TokenMonitor`
+3. **Chuột phải** → chọn **Start** / **Stop** / **Restart**
+
+#### Bằng Services Panel (services.msc)
+
+```powershell
+# Mở cửa sổ Services
+services.msc
+```
+
+Tìm `TokenMonitor Daemon` trong danh sách → có thể cấu hình thêm Recovery (tự restart khi crash), Startup type, v.v.
+
+### 2.4. Cập nhật phiên bản mới
+
+Khi biên dịch lại `token_monitor.exe` sau khi sửa code:
+
+```powershell
+# Bước 1: Dừng service
+sc.exe stop TokenMonitor
+
+# Bước 2: Biên dịch lại
+cd "E:\GoogleDrive\WorkSpace\Code\ProjectGolang\GoLangDev\TokenMonitor"
+go build -o token_monitor.exe .
+
+# Bước 3: Khởi động lại service
+sc.exe start TokenMonitor
+
+# Bước 4: Xác nhận
+sc.exe query TokenMonitor
+```
+
+> ✅ **Không cần** `install` lại service. NSSM trỏ thẳng đến file `.exe` — chỉ cần Stop → Build → Start.
+
+### 2.5. Gỡ bỏ Service
+
+```powershell
+# Bước 1: Dừng service (nếu đang chạy)
+sc.exe stop TokenMonitor
+
+# Bước 2: Gỡ bỏ hoàn toàn
+.\token_monitor.exe -service uninstall
+```
+
+Kết quả:
+```
+[INFO] ✅ Service "TokenMonitor" đã được gỡ bỏ hoàn toàn
+```
+
+---
+
+## 3. Phương Án 2: NSSM (Service Wrapper)
+
+Dùng khi không thể biên dịch lại binary (ví dụ chỉ có file `.exe` cũ chưa tích hợp `-service install`).
+
+> **NSSM** (*Non-Sucking Service Manager*) — [nssm.cc](https://nssm.cc) — bọc bất kỳ console app nào thành Windows Service.
+
+### Cài đặt NSSM
 
 ```powershell
 winget install NSSM.NSSM
 ```
 
-**Cách 2 — Tải thủ công:**
+### Đăng ký Service
 
-1. Truy cập: [nssm.cc/download](https://nssm.cc/download)
-2. Tải bản mới nhất (file `.zip`)
-3. Giải nén, copy file `win64\nssm.exe` vào `C:\Windows\System32\`
-
-**Xác nhận cài đặt:**
+Mở **PowerShell (Administrator)**:
 
 ```powershell
-nssm version
-# Kết quả mong đợi: NSSM 2.24-101-g897c7ad ...
-```
+$D = "E:\GoogleDrive\WorkSpace\Code\ProjectGolang\GoLangDev\TokenMonitor"
+New-Item -ItemType Directory -Path "$D\logs" -Force
 
----
+nssm install TokenMonitor "$D\token_monitor.exe"
+nssm set TokenMonitor AppDirectory        $D
+nssm set TokenMonitor AppParameters       "-config config.yaml"
+nssm set TokenMonitor DisplayName         "TokenMonitor Daemon"
+nssm set TokenMonitor Description         "TokenMonitor - AI Agent Observability & FinOps Dashboard (Port 9090)"
+nssm set TokenMonitor Start               SERVICE_AUTO_START
+nssm set TokenMonitor AppStdout           "$D\logs\service.log"
+nssm set TokenMonitor AppStderr           "$D\logs\service_err.log"
+nssm set TokenMonitor AppRotateFiles      1
+nssm set TokenMonitor AppRotateBytes      10485760
+nssm set TokenMonitor AppRestartDelay     5000
 
-### 2.2. Đăng ký Service
-
-Chạy lần lượt các lệnh sau trong **PowerShell (Administrator)**:
-
-```powershell
-# ── Biến cấu hình ──
-$WORK_DIR = "E:\GoogleDrive\WorkSpace\Code\ProjectGolang\GoLangDev\TokenMonitor"
-$EXE_PATH = "$WORK_DIR\token_monitor.exe"
-$LOG_DIR  = "$WORK_DIR\logs"
-
-# Tạo thư mục logs nếu chưa có
-if (!(Test-Path $LOG_DIR)) {
-    New-Item -ItemType Directory -Path $LOG_DIR -Force
-}
-
-# ── 1. Đăng ký Windows Service ──
-nssm install TokenMonitor $EXE_PATH
-
-# ── 2. Thư mục làm việc (BẮT BUỘC — để đọc config.yaml và data/) ──
-nssm set TokenMonitor AppDirectory $WORK_DIR
-
-# ── 3. Tham số khởi động ──
-nssm set TokenMonitor AppParameters "-config config.yaml"
-
-# ── 4. Tên hiển thị và mô tả ──
-nssm set TokenMonitor DisplayName "TokenMonitor Daemon"
-nssm set TokenMonitor Description "TokenMonitor - AI Agent Observability & FinOps Dashboard (Port 9090)"
-
-# ── 5. Chế độ khởi động tự động cùng Windows ──
-nssm set TokenMonitor Start SERVICE_AUTO_START
-
-# ── 6. Chuyển hướng log ra file ──
-nssm set TokenMonitor AppStdout "$LOG_DIR\service.log"
-nssm set TokenMonitor AppStderr "$LOG_DIR\service_err.log"
-
-# ── 7. Tự động xoay vòng log khi đạt 10MB ──
-nssm set TokenMonitor AppRotateFiles 1
-nssm set TokenMonitor AppRotateBytes 10485760
-
-# ── 8. Tự restart sau 5 giây nếu app bị tắt đột ngột ──
-nssm set TokenMonitor AppRestartDelay 5000
-```
-
-> **💡 MẸO**: Nếu muốn dùng giao diện đồ họa (GUI) thay vì dòng lệnh:
-> ```powershell
-> nssm edit TokenMonitor
-> ```
-> Cửa sổ GUI sẽ mở ra với đầy đủ các tab: *Application*, *Details*, *Log on*, *I/O*, v.v.
-
----
-
-### 2.3. Khởi động & Kiểm tra
-
-```powershell
-# Tắt process cũ nếu đang chạy thủ công
-Get-Process -Name token_monitor -ErrorAction SilentlyContinue | Stop-Process -Force
-
-# Khởi động service
 nssm start TokenMonitor
-
-# Kiểm tra trạng thái
-nssm status TokenMonitor
-# ✅ Kết quả mong đợi: SERVICE_RUNNING
+nssm status TokenMonitor   # → SERVICE_RUNNING
 ```
 
-Sau khi chạy thành công, mở **Task Manager → tab Services** sẽ thấy dòng:
+### Lệnh quản trị NSSM
 
-| Name | PID | Description |
-| :--- | :--- | :--- |
-| **TokenMonitor** | *<số PID>* | TokenMonitor - AI Agent Observability & FinOps Dashboard (Port 9090) |
-
----
-
-### 2.4. Các lệnh quản trị hàng ngày
-
-| Thao tác | Lệnh PowerShell (Administrator) |
-| :--- | :--- |
-| **Khởi động** | `nssm start TokenMonitor` |
-| **Tạm dừng** | `nssm stop TokenMonitor` |
-| **Khởi động lại** | `nssm restart TokenMonitor` |
-| **Xem trạng thái** | `nssm status TokenMonitor` |
-| **Chỉnh sửa cấu hình (GUI)** | `nssm edit TokenMonitor` |
-| **Xem log stdout** | `Get-Content "$WORK_DIR\logs\service.log" -Tail 50` |
-| **Xem log stderr** | `Get-Content "$WORK_DIR\logs\service_err.log" -Tail 50` |
-| **Theo dõi log realtime** | `Get-Content "$WORK_DIR\logs\service.log" -Wait -Tail 20` |
-| **Gỡ bỏ hoàn toàn service** | `nssm remove TokenMonitor confirm` |
-
-> **⚠️ Lưu ý**: Anh cũng có thể Start/Stop/Restart trực tiếp bằng **chuột phải** lên dòng `TokenMonitor` trong tab Services của Task Manager.
+| Thao tác | Lệnh |
+|:---|:---|
+| Khởi động | `nssm start TokenMonitor` |
+| Dừng | `nssm stop TokenMonitor` |
+| Khởi động lại | `nssm restart TokenMonitor` |
+| Trạng thái | `nssm status TokenMonitor` |
+| Chỉnh sửa GUI | `nssm edit TokenMonitor` |
+| Xem log realtime | `Get-Content "$D\logs\service.log" -Wait -Tail 20` |
+| Gỡ bỏ hoàn toàn | `nssm remove TokenMonitor confirm` |
 
 ---
 
-## 3. Phương Án 2: Windows Task Scheduler (Native)
+## 4. Phương Án 3: Windows Task Scheduler (100% Native, không vào tab Services)
 
-Nếu không muốn cài thêm NSSM, có thể dùng **Task Scheduler** có sẵn trong Windows. Hạn chế duy nhất: task **không hiển thị** trong tab Services của Task Manager, nhưng vẫn chạy nền 100% và tự khởi động cùng Windows.
+Dùng khi không muốn cài bất kỳ gì và không cần hiển thị trong tab Services.
 
-### 3.1. Cấu hình bằng PowerShell
+> ⚠️ **Hạn chế**: Task Scheduler **không hiển thị** trong tab Services của Task Manager.
 
-Mở **PowerShell (Run as Administrator)** và dán đoạn lệnh sau:
+### Cấu hình bằng PowerShell (Administrator)
 
 ```powershell
-$action = New-ScheduledTaskAction `
-    -Execute "E:\GoogleDrive\WorkSpace\Code\ProjectGolang\GoLangDev\TokenMonitor\token_monitor.exe" `
-    -Argument "-config config.yaml" `
-    -WorkingDirectory "E:\GoogleDrive\WorkSpace\Code\ProjectGolang\GoLangDev\TokenMonitor"
+$D = "E:\GoogleDrive\WorkSpace\Code\ProjectGolang\GoLangDev\TokenMonitor"
 
-# Kích hoạt khi đăng nhập máy tính
+$action = New-ScheduledTaskAction `
+    -Execute "$D\token_monitor.exe" `
+    -Argument "-config config.yaml" `
+    -WorkingDirectory $D
+
 $trigger = New-ScheduledTaskTrigger -AtLogOn
 
-# Thiết lập: không giới hạn thời gian chạy, tự restart nếu lỗi
 $settings = New-ScheduledTaskSettingsSet `
     -AllowStartIfOnBatteries `
     -DontStopIfGoingOnBatteries `
@@ -207,7 +272,6 @@ $settings = New-ScheduledTaskSettingsSet `
     -RestartCount 3 `
     -RestartInterval (New-TimeSpan -Minutes 1)
 
-# Đăng ký tác vụ
 Register-ScheduledTask `
     -TaskName "TokenMonitorDaemon" `
     -Action $action `
@@ -216,150 +280,161 @@ Register-ScheduledTask `
     -RunLevel Highest `
     -Description "TokenMonitor Background Daemon on Port 9090"
 
-# Kích hoạt chạy ngay lập tức
 Start-ScheduledTask -TaskName "TokenMonitorDaemon"
 ```
 
-### 3.2. Cấu hình bằng giao diện GUI
+### Lệnh quản trị Task Scheduler
 
-1. Nhấn `Win + R`, gõ `taskschd.msc` và Enter
-2. Cột bên phải, bấm **Create Task...**
-3. **Tab General**:
-   - Name: `TokenMonitorDaemon`
-   - Description: `TokenMonitor Background Daemon on Port 9090`
-   - Tích ☑ **Run with highest privileges**
-   - Tích ☑ **Run whether user is logged on or not** *(để ẩn cửa sổ đen)*
-4. **Tab Triggers**:
-   - Bấm **New...** → Begin the task: **At log on** → OK
-5. **Tab Actions**:
-   - Bấm **New...**
-   - Program/script: `E:\GoogleDrive\WorkSpace\Code\ProjectGolang\GoLangDev\TokenMonitor\token_monitor.exe`
-   - Add arguments: `-config config.yaml`
-   - Start in: `E:\GoogleDrive\WorkSpace\Code\ProjectGolang\GoLangDev\TokenMonitor`
-   - Bấm OK
-6. **Tab Settings**:
-   - **Bỏ tích** dòng *"Stop the task if it runs longer than..."*
-   - Tích ☑ *"If the running task does not end when requested, force it to stop"*
-   - Mục *"If the task fails, restart every"*: chọn **1 minute**, tối đa **3 lần**
-7. Bấm **OK** để lưu
-
-### Quản trị Task Scheduler
-
-| Thao tác | Lệnh PowerShell |
-| :--- | :--- |
-| **Kích hoạt** | `Start-ScheduledTask -TaskName "TokenMonitorDaemon"` |
-| **Tạm dừng** | `Stop-ScheduledTask -TaskName "TokenMonitorDaemon"` |
-| **Xem trạng thái** | `Get-ScheduledTask -TaskName "TokenMonitorDaemon" \| Select-Object State` |
-| **Gỡ bỏ** | `Unregister-ScheduledTask -TaskName "TokenMonitorDaemon" -Confirm:$false` |
+| Thao tác | Lệnh |
+|:---|:---|
+| Khởi động | `Start-ScheduledTask -TaskName "TokenMonitorDaemon"` |
+| Dừng | `Stop-ScheduledTask -TaskName "TokenMonitorDaemon"` |
+| Trạng thái | `Get-ScheduledTask -TaskName "TokenMonitorDaemon" \| Select State` |
+| Gỡ bỏ | `Unregister-ScheduledTask -TaskName "TokenMonitorDaemon" -Confirm:$false` |
 
 ---
 
-## 4. Nghiệm Thu & Xác Nhận
+## 5. Nghiệm Thu & Xác Nhận
 
-Sau khi cấu hình xong (bằng NSSM hoặc Task Scheduler):
-
-### Bước 1: Kiểm tra service đang chạy
+### Bước 1 — Kiểm tra port 9090 đang lắng nghe
 
 ```powershell
-# Kiểm tra port 9090 đang lắng nghe
-Get-NetTCPConnection -LocalPort 9090 -ErrorAction SilentlyContinue | Select-Object LocalPort, State, OwningProcess
+Get-NetTCPConnection -LocalPort 9090 | Select-Object LocalPort, State, OwningProcess
+# ✅ State: Listen
 ```
 
-### Bước 2: Truy cập Dashboard
+### Bước 2 — Truy cập Dashboard
 
 Mở trình duyệt → **http://localhost:9090**
-- Giao diện Dashboard & Topology Graph hiển thị bình thường = ✅ Thành công
+- Dashboard và Topology Graph hiển thị bình thường = ✅ Thành công
 
-### Bước 3: Kiểm tra sau Restart Windows
+### Bước 3 — Kiểm tra sau Restart Windows
 
-1. Khởi động lại máy tính (Restart Windows)
-2. **Không mở** bất kỳ terminal/PowerShell nào
+1. Khởi động lại máy tính
+2. **Không mở** bất kỳ terminal nào
 3. Mở trình duyệt → **http://localhost:9090**
-4. Dashboard tải tức thì và dữ liệu token vẫn được ghi nhận = ✅ Service hoạt động hoàn hảo
+4. Dashboard tải và dữ liệu token vẫn đang được thu thập = ✅ Service hoạt động hoàn hảo
 
-### Bước 4: Xác nhận trong Task Manager (chỉ NSSM)
+### Bước 4 — Xem trong Task Manager
 
-Mở **Task Manager → tab Services** → Tìm dòng **TokenMonitor** → Trạng thái **Running**
+Mở **Task Manager → tab Services** → Tìm dòng **`TokenMonitor`**:
+
+| Name | PID | Description | Status |
+|:---|:---|:---|:---|
+| `TokenMonitor` | *số PID* | TokenMonitor - AI Agent Observability & FinOps Dashboard (Port 9090) | **Running** |
 
 ---
 
-## 5. Xử Lý Sự Cố
+## 6. Xử Lý Sự Cố
 
-### Lỗi 1: Port 9090 bị chiếm bởi process khác
+### Lỗi: "Access Denied" khi install/uninstall
+
+```
+Nguyên nhân: Chưa chạy PowerShell với quyền Administrator
+Giải pháp:   Nhấn phải vào PowerShell → "Run as administrator"
+```
+
+### Lỗi: Port 9090 đã bị chiếm
 
 ```powershell
-# Tìm process đang chiếm port 9090
+# Tìm process đang chiếm port
 Get-NetTCPConnection -LocalPort 9090 | Select-Object OwningProcess
-Get-Process -Id <PID> | Select-Object ProcessName, Path
+Get-Process -Id <PID_ở_trên> | Select-Object Id, ProcessName, Path
 
-# Tắt process đó
+# Nếu là tiến trình token_monitor.exe cũ đang chạy thủ công
 Stop-Process -Id <PID> -Force
 
-# Khởi động lại service
-nssm restart TokenMonitor
+# Bật lại service
+sc.exe start TokenMonitor
 ```
 
-### Lỗi 2: Service không khởi động — kiểm tra log
+### Lỗi: Service dừng ngay sau khi Start
 
 ```powershell
-# Đọc log lỗi
-Get-Content "E:\GoogleDrive\WorkSpace\Code\ProjectGolang\GoLangDev\TokenMonitor\logs\service_err.log" -Tail 30
+# Kiểm tra Windows Event Log
+Get-EventLog -LogName Application -Source TokenMonitor -Newest 10 |
+    Select-Object TimeGenerated, Message | Format-List
 ```
 
-### Lỗi 3: NSSM báo "Service already exists"
+```powershell
+# Hoặc thử chạy thủ công để xem lỗi trực tiếp
+cd "E:\GoogleDrive\WorkSpace\Code\ProjectGolang\GoLangDev\TokenMonitor"
+.\token_monitor.exe -config config.yaml
+# Xem thông báo lỗi hiển thị trong cửa sổ đen
+```
+
+### Lỗi: "Service already exists" khi install
 
 ```powershell
-# Gỡ bỏ service cũ trước
-nssm remove TokenMonitor confirm
+# Gỡ service cũ trước
+sc.exe stop TokenMonitor
+.\token_monitor.exe -service uninstall
 
 # Đăng ký lại
-nssm install TokenMonitor "E:\GoogleDrive\WorkSpace\Code\ProjectGolang\GoLangDev\TokenMonitor\token_monitor.exe"
-# ... (chạy lại các lệnh nssm set ở mục 2.2)
+.\token_monitor.exe -service install
+sc.exe start TokenMonitor
 ```
 
-### Lỗi 4: Task Scheduler — task chạy rồi tắt ngay
+### Lỗi: config.yaml không tìm thấy khi chạy Service
 
-Nguyên nhân thường gặp: thiếu trường **Start in** (Working Directory).
-- Mở Task Scheduler → tìm task `TokenMonitorDaemon` → Properties → tab Actions → Edit
-- Điền đúng ô **Start in**: `E:\GoogleDrive\WorkSpace\Code\ProjectGolang\GoLangDev\TokenMonitor`
+```
+Nguyên nhân: SCM khởi động từ thư mục hệ thống (C:\Windows\System32),
+             không phải thư mục dự án. Hàm installService() trong winsvc.go
+             đã xử lý bằng cách ghi đường dẫn tuyệt đối vào Registry.
+Kiểm tra:    sc.exe qc TokenMonitor
+             → BINARY_PATH_NAME phải chứa -config <đường dẫn tuyệt đối>
+```
 
 ---
 
-## 6. Cập Nhật Phiên Bản Mới
+## 7. So Sánh Ba Phương Án
 
-Khi biên dịch lại `token_monitor.exe` (ví dụ sau khi sửa code và `go build`):
+| Tiêu chí | ⭐ Phương án 1<br>Native Go Service | Phương án 2<br>NSSM | Phương án 3<br>Task Scheduler |
+|:---|:---:|:---:|:---:|
+| Cần cài thêm phần mềm | ❌ Không | ✅ Cần NSSM | ❌ Không |
+| Hiển thị trong tab Services | ✅ | ✅ | ❌ |
+| Tự khởi động cùng Windows | ✅ | ✅ | ✅ |
+| Ẩn cửa sổ đen hoàn toàn | ✅ | ✅ | ✅ |
+| Graceful Shutdown (lưu DB) | ✅ | ✅ | ⚠️ (kill ngay) |
+| Ghi log ra file riêng | ⚠️ Windows Event Log | ✅ file .log | ❌ |
+| Tự restart khi crash | ⚠️ Cần cấu hình thêm | ✅ AppRestartDelay | ✅ RestartCount |
+| Start/Stop bằng chuột | ✅ Task Manager | ✅ Task Manager | ❌ Task Scheduler |
+| Độ chuyên nghiệp | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐ |
 
-```powershell
-# 1. Dừng service
-nssm stop TokenMonitor
-
-# 2. Biên dịch lại (trong thư mục dự án)
-Set-Location "E:\GoogleDrive\WorkSpace\Code\ProjectGolang\GoLangDev\TokenMonitor"
-go build -o token_monitor.exe .
-
-# 3. Khởi động lại service
-nssm start TokenMonitor
-
-# 4. Xác nhận
-nssm status TokenMonitor
-# ✅ SERVICE_RUNNING
-```
-
-> **💡 MẸO**: Không cần đăng ký lại service (không cần `nssm install` lại). Chỉ cần Stop → Build → Start là đủ vì NSSM trỏ trực tiếp đến file `token_monitor.exe` tại vị trí cố định.
+> **Khuyến nghị**: Dùng **Phương án 1** (Native Go Service) vì không cần cài gì thêm, tích hợp trực tiếp vào binary, Graceful Shutdown đúng chuẩn, và hiển thị đầy đủ trong tab Services như một service hệ thống Windows thực thụ.
 
 ---
 
-## So Sánh Hai Phương Án
+## Phụ Lục: Kiến Trúc Kỹ Thuật Phương Án 1
 
-| Tiêu chí | NSSM (Phương án 1) | Task Scheduler (Phương án 2) |
-| :--- | :--- | :--- |
-| Hiển thị trong Task Manager → Services | ✅ **Có** | ❌ Không |
-| Cần cài thêm tool | ✅ Cần cài NSSM (~300KB) | ❌ 100% Native |
-| Tự khởi động cùng Windows | ✅ | ✅ |
-| Tự restart khi crash | ✅ (sau 5 giây) | ✅ (sau 1 phút, tối đa 3 lần) |
-| Ghi log ra file riêng | ✅ Tự động | ❌ Phải tự cấu hình thêm |
-| Xoay vòng log (Log rotation) | ✅ Tự động (10MB) | ❌ Không có |
-| Start/Stop bằng chuột (Task Manager) | ✅ | ❌ Phải vào Task Scheduler |
-| Độ chuyên nghiệp | ⭐⭐⭐⭐⭐ | ⭐⭐⭐ |
+### Các file liên quan
 
-> **Khuyến nghị**: Dùng **NSSM (Phương án 1)** để có trải nghiệm quản trị chuyên nghiệp nhất, hiển thị đúng trong tab Services của Task Manager như yêu cầu.
+| File | Vai trò |
+|:---|:---|
+| [`winsvc.go`](../winsvc.go) | Windows Service handler — chỉ compile trên Windows (`//go:build windows`). Implements `svc.Handler`, xử lý bắt tay SCM, nhận lệnh Stop/Shutdown |
+| [`main.go`](../main.go) | Entry point — nhận flag `-service install/uninstall`, phát hiện tự động khi đang chạy dưới SCM qua `isWindowsService()` |
+
+### Luồng khởi động khi chạy dưới SCM
+
+```
+Windows Boot
+    → SCM đọc Registry → tìm "TokenMonitor"
+    → Chạy: token_monitor.exe -config C:\...\config.yaml
+    → main() → isWindowsService() = true
+    → runAsWindowsService() → svc.Run("TokenMonitor", handler)
+    → handler.Execute() → gửi SERVICE_RUNNING về SCM
+    → LocalTailer, CodexMonitor, ClaudeMonitor, Web Dashboard :9090 khởi động
+    → Chờ lệnh Stop từ SCM (hoặc SIGTERM)
+    → Graceful Shutdown: lưu DB, backup, đóng HTTP server
+    → Báo SERVICE_STOPPED về SCM → thoát
+```
+
+### Thư viện sử dụng
+
+```
+golang.org/x/sys/windows/svc        — Windows Service lifecycle (Start/Stop/Shutdown)
+golang.org/x/sys/windows/svc/mgr    — Kết nối và thao tác với Windows SCM
+golang.org/x/sys/windows/svc/eventlog — Ghi log vào Windows Event Viewer
+```
+
+Thư viện này đã có sẵn trong `go.mod` của dự án (`golang.org/x/sys v0.47.0`) — không cần `go get` thêm.
