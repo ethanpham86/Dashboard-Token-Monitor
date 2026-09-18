@@ -1452,7 +1452,11 @@ func isIgnoredProjectSegment(seg string) bool {
 		"config", "skills", "builtin", "plugins", "rules", "node_modules", "vendor",
 		"artifacts", "dist", "build", "bin", "pkg", "obj", "src", "cmd", "internal", "lib", "public", "assets", "home",
 		"mylearning", "projectgolang", "golangdev", "projectr", "securitystandards",
-		"user_uploaded":
+		"user_uploaded", "tbd", "todo", "unknown", "null", "none", "undefined", "workspace chung", "workspace-chung":
+		return true
+	}
+	// Bỏ qua nếu chỉ toàn chữ số (số dòng code hoặc số thứ tự)
+	if matchedDigits, _ := regexp.MatchString(`^\d+$`, sLower); matchedDigits {
 		return true
 	}
 	if strings.HasPrefix(sLower, "n-") || strings.HasPrefix(sLower, "n.") || strings.HasPrefix(sLower, "n#") {
@@ -1466,7 +1470,8 @@ func isIgnoredProjectSegment(seg string) bool {
 		return true
 	}
 	// Bỏ qua thư mục kỹ năng hoặc tên package skill
-	if strings.Contains(sLower, "skill") || strings.HasSuffix(sLower, "-main") || strings.HasSuffix(sLower, "-master") {
+	if strings.Contains(sLower, "skill") || strings.Contains(sLower, "my-skills") || strings.Contains(sLower, "skillai") ||
+		strings.HasSuffix(sLower, "-main") || strings.HasSuffix(sLower, "-master") {
 		return true
 	}
 	// Bỏ qua các chuỗi comment HTML, Markdown hoặc tiêu đề bảng biểu
@@ -1515,24 +1520,17 @@ func ExtractProjectFromPathString(raw string) (string, string) {
 	raw = strings.Trim(raw, " \t\r\n\"'`.,;:<>{}[]()")
 
 	rawLower := strings.ToLower(raw)
-	// Loại trừ tuyệt đối các đường dẫn nội bộ của AI Agent / IDE / Skills
-	if strings.Contains(rawLower, "/.gemini/") || strings.Contains(rawLower, "/gemini/") ||
-		strings.Contains(rawLower, "/.claude/") || strings.Contains(rawLower, "/claude/") ||
-		strings.Contains(rawLower, "/.codex/") || strings.Contains(rawLower, "/codex/") ||
-		strings.Contains(rawLower, "/skills/") || strings.Contains(rawLower, "/plugins/") ||
-		strings.Contains(rawLower, "/builtin/") || strings.Contains(rawLower, "/brain/") ||
-		strings.Contains(rawLower, "/scratch/") || strings.Contains(rawLower, "/artifacts/") ||
-		strings.Contains(rawLower, "/user_uploaded/") || strings.Contains(rawLower, "/.system_generated/") {
+	rawTrimmed := strings.Trim(rawLower, " \t\r\n\"'`.,;:<>{}[]()")
+	if rawTrimmed == "" || rawTrimmed == "tbd" || rawTrimmed == "todo" || rawTrimmed == "unknown" ||
+		rawTrimmed == "null" || rawTrimmed == "none" || rawTrimmed == "undefined" ||
+		rawTrimmed == "workspace chung" || rawTrimmed == "workspace-chung" {
 		return "", ""
 	}
 
-	// Cắt bỏ phần .agents/ trở về sau vì toàn bộ file/folder dưới .agents là không gian nội bộ của subagents
-	if idx := strings.Index(rawLower, "/.agents"); idx != -1 {
-		raw = raw[:idx]
-		rawLower = rawLower[:idx]
-	}
-
 	// 1. Kiểm tra nhanh các dự án lõi nếu xuất hiện bất kỳ đâu trong đường dẫn
+	if strings.Contains(rawLower, "monitorthuchiho") || strings.Contains(rawLower, "thuchiho") || strings.Contains(rawLower, "monitor-pipeline") {
+		return "proj-monitorthuchiho", "MonitorThuChiHo"
+	}
 	if strings.Contains(rawLower, "webdownload") || strings.Contains(rawLower, "saoke") || strings.Contains(rawLower, "skt24") {
 		return "proj-webdownloadskt24", "WebDownloadSKT24 (UI/UX Portal)"
 	}
@@ -1555,6 +1553,25 @@ func ExtractProjectFromPathString(raw string) (string, string) {
 		return "proj-projectscriptos", "ProjectScriptOS"
 	}
 
+	// Loại trừ tuyệt đối các đường dẫn nội bộ của AI Agent / IDE / Skills nếu không thuộc dự án lõi
+	if strings.Contains(rawLower, "/.gemini/") || strings.Contains(rawLower, "/gemini/") ||
+		strings.Contains(rawLower, "/.claude/") || strings.Contains(rawLower, "/claude/") ||
+		strings.Contains(rawLower, "/.codex/") || strings.Contains(rawLower, "/codex/") ||
+		strings.Contains(rawLower, "/skills/") || strings.Contains(rawLower, "/my-skills/") || strings.Contains(rawLower, "skillai") ||
+		strings.Contains(rawLower, "/plugins/") ||
+		strings.Contains(rawLower, "/builtin/") || strings.Contains(rawLower, "/brain/") ||
+		strings.Contains(rawLower, "/scratch/") || strings.Contains(rawLower, "/artifacts/") ||
+		strings.Contains(rawLower, "/user_uploaded/") || strings.Contains(rawLower, "/.system_generated/") {
+		return "", ""
+	}
+
+	// Cắt bỏ phần .agents/ trở về sau vì toàn bộ file/folder dưới .agents là không gian nội bộ của subagents
+	if idx := strings.Index(rawLower, "/.agents"); idx != -1 {
+		raw = raw[:idx]
+		rawLower = rawLower[:idx]
+	}
+
+
 	// Bỏ ký tự ổ đĩa ví dụ C:/ hoặc E:/
 	if len(raw) >= 2 && raw[1] == ':' {
 		raw = raw[2:]
@@ -1568,7 +1585,7 @@ func ExtractProjectFromPathString(raw string) (string, string) {
 			candidate := strings.Trim(parts[i+1], " \t\r\n\"'`.,;:<>{}[]()#*")
 			if !isIgnoredProjectSegment(candidate) {
 				id, name, _ := ResolveCrossLLMProject(candidate)
-				if id != "" && name != "" {
+				if id != "" && name != "" && id != "proj-workspace-chung" {
 					return id, name
 				}
 			}
@@ -1580,7 +1597,7 @@ func ExtractProjectFromPathString(raw string) (string, string) {
 		seg := strings.Trim(parts[i], " \t\r\n\"'`.,;:<>{}[]()#*")
 		if !isIgnoredProjectSegment(seg) {
 			id, name, _ := ResolveCrossLLMProject(seg)
-			if id != "" && name != "" {
+			if id != "" && name != "" && id != "proj-workspace-chung" {
 				return id, name
 			}
 		}
@@ -1593,6 +1610,9 @@ func ExtractProjectFromPathString(raw string) (string, string) {
 func resolveSubagentProject(subagentID, roleName, taskName string) (projID, projName string) {
 	// 1. Nhận diện từ khóa đặc trưng trong taskName
 	taskLower := strings.ToLower(taskName)
+	if strings.Contains(taskLower, "monitorthuchiho") || strings.Contains(taskLower, "thuchiho") || strings.Contains(taskLower, "monitor-pipeline") {
+		return "proj-monitorthuchiho", "MonitorThuChiHo"
+	}
 	if strings.Contains(taskLower, "tokenmonitor") || strings.Contains(taskLower, "token_monitor") ||
 		strings.Contains(taskLower, "token monitor") || strings.Contains(taskLower, "golangdev") {
 		return "proj-tokenmonitor", "TokenMonitor (GoLangDev)"
@@ -1630,7 +1650,12 @@ func resolveSubagentProject(subagentID, roleName, taskName string) (projID, proj
 		convPrefix == "574184f1" || convPrefix == "511bb89e" {
 		return "proj-tokenmonitor", "TokenMonitor (GoLangDev)"
 	}
-	if strings.HasPrefix(convPrefix, "webdownload") || strings.HasPrefix(convPrefix, "saoke") {
+	if strings.HasPrefix(convPrefix, "thuchiho") ||
+		convPrefix == "4930abd1" || convPrefix == "001ecc61" || convPrefix == "4ee53189" ||
+		convPrefix == "e7c36246" || convPrefix == "5eac2e31" || convPrefix == "2049726b" {
+		return "proj-monitorthuchiho", "MonitorThuChiHo"
+	}
+	if strings.HasPrefix(convPrefix, "webdownload") || strings.HasPrefix(convPrefix, "saoke") || convPrefix == "4e26d340" {
 		return "proj-webdownloadskt24", "WebDownloadSKT24 (UI/UX Portal)"
 	}
 	if strings.HasPrefix(convPrefix, "tch") || convPrefix == "227fb340" || convPrefix == "abe42560" || convPrefix == "b71cdefa" {
@@ -1689,7 +1714,7 @@ func resolveSubagentProject(subagentID, roleName, taskName string) (projID, proj
 						buf := make([]byte, 64*1024)
 						scanner.Buffer(buf, 1024*1024)
 						lineCount := 0
-						for scanner.Scan() && lineCount < 60 {
+						for scanner.Scan() && lineCount < 100 {
 							lineText := scanner.Text()
 							lineCount++
 
@@ -1710,7 +1735,7 @@ func resolveSubagentProject(subagentID, roleName, taskName string) (projID, proj
 
 							if rawCandidate != "" {
 								pID, pName := ExtractProjectFromPathString(rawCandidate)
-								if pID != "" && pName != "" {
+								if pID != "" && pName != "" && pID != "proj-workspace-chung" {
 									f.Close()
 									convProjectMu.Lock()
 									convProjectCache[convPrefix] = struct{ ID, Name string }{ID: pID, Name: pName}
@@ -1723,6 +1748,23 @@ func resolveSubagentProject(subagentID, roleName, taskName string) (projID, proj
 							normLower := strings.ToLower(normalized)
 
 							// Ưu tiên 1: Nhận diện chuẩn xác theo đường dẫn Workspace / CWD / Thư mục thao tác thực tế
+							if strings.Contains(normLower, "/monitorthuchiho") || strings.Contains(normLower, "monitorthuchiho/") ||
+								strings.Contains(normLower, "/thuchiho") || strings.Contains(normLower, "thuchiho/") {
+								f.Close()
+								convProjectMu.Lock()
+								convProjectCache[convPrefix] = struct{ ID, Name string }{ID: "proj-monitorthuchiho", Name: "MonitorThuChiHo"}
+								convProjectMu.Unlock()
+								return "proj-monitorthuchiho", "MonitorThuChiHo"
+							}
+							if strings.Contains(normLower, "/webdownloadskt24") || strings.Contains(normLower, "webdownloadskt24/") ||
+								strings.Contains(normLower, "/webdownload") || strings.Contains(normLower, "webdownload/") ||
+								strings.Contains(normLower, "/saoke") || strings.Contains(normLower, "saoke/") {
+								f.Close()
+								convProjectMu.Lock()
+								convProjectCache[convPrefix] = struct{ ID, Name string }{ID: "proj-webdownloadskt24", Name: "WebDownloadSKT24 (UI/UX Portal)"}
+								convProjectMu.Unlock()
+								return "proj-webdownloadskt24", "WebDownloadSKT24 (UI/UX Portal)"
+							}
 							if strings.Contains(normLower, "/tokenmonitor") || strings.Contains(normLower, "tokenmonitor/") ||
 								strings.Contains(normLower, "golangdev/tokenmonitor") {
 								f.Close()
@@ -1779,13 +1821,15 @@ func resolveSubagentProject(subagentID, roleName, taskName string) (projID, proj
 
 							folder = strings.Trim(strings.TrimSpace(folder), `"'`)
 							fLower := strings.ToLower(folder)
-							if len(folder) > 2 && fLower != "code" && fLower != "workspace" && fLower != "." && fLower != "tmp" {
-								f.Close()
+							if len(folder) > 2 && !isIgnoredProjectSegment(folder) && fLower != "code" && fLower != "workspace" && fLower != "." && fLower != "tmp" {
 								pID, pName, _ := ResolveCrossLLMProject(folder)
-								convProjectMu.Lock()
-								convProjectCache[convPrefix] = struct{ ID, Name string }{ID: pID, Name: pName}
-								convProjectMu.Unlock()
-								return pID, pName
+								if pID != "proj-workspace-chung" && pID != "" && pName != "" {
+									f.Close()
+									convProjectMu.Lock()
+									convProjectCache[convPrefix] = struct{ ID, Name string }{ID: pID, Name: pName}
+									convProjectMu.Unlock()
+									return pID, pName
+								}
 							}
 						}
 						f.Close()
@@ -2514,6 +2558,8 @@ func ResolveCrossLLMProject(rawPathOrName string) (id, name, workspace string) {
 
 	// 1. So khớp trực tiếp theo ID chuẩn
 	switch normLower {
+	case "proj-monitorthuchiho":
+		return "proj-monitorthuchiho", "MonitorThuChiHo", "GoLangDev/MonitorThuChiHo"
 	case "proj-tokenmonitor":
 		return "proj-tokenmonitor", "TokenMonitor (GoLangDev)", "GoLangDev/TokenMonitor"
 	case "proj-webdownloadskt24", "proj-saoke-downloader", "proj-saoke":
@@ -2526,7 +2572,12 @@ func ResolveCrossLLMProject(rawPathOrName string) (id, name, workspace string) {
 		return "proj-projectscriptos", "ProjectScriptOS", "ProjectScriptOS"
 	}
 
-	// 2. Cụm WebDownloadSKT24 (UI/UX Portal)
+	// 2. Cụm MonitorThuChiHo
+	if strings.Contains(normLower, "monitorthuchiho") || strings.Contains(normLower, "thuchiho") || strings.Contains(normLower, "monitor-pipeline") {
+		return "proj-monitorthuchiho", "MonitorThuChiHo", "GoLangDev/MonitorThuChiHo"
+	}
+
+	// 3. Cụm WebDownloadSKT24 (UI/UX Portal)
 	if strings.Contains(normLower, "webdownload") || strings.Contains(normLower, "saoke") || strings.Contains(normLower, "skt24") {
 		return "proj-webdownloadskt24", "WebDownloadSKT24 (UI/UX Portal)", "GoLangDev/WebDownloadSKT24"
 	}
